@@ -1,0 +1,579 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ========== TENANT MODEL ==========
+model Tenant {
+  id              String   @id @default(cuid())
+  name            String   @unique // Nome da empresa/loja
+  slug            String   @unique // URL-friendly identifier
+  email           String
+  phone           String?
+  address         String?
+  city            String?
+  state           String?
+  zipCode         String?
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relações
+  users              User[]
+  orders             Order[]
+  products           Product[]
+  deliveries         Delivery[]
+  customers          Customer[]
+  ingredients        Ingredient[]
+  productIngredients ProductIngredient[]
+  cashRegisters      CashRegister[]
+  accountsPayable    AccountPayable[]
+  dreCategories      DreCategory[]
+  invoices           Invoice[]
+  salesChannels      SalesChannel[]
+  pricingRules       PricingRule[]
+  fleet              Fleet[]
+  deliveryQuotes     DeliveryQuote[]
+
+  @@map("tenants")
+}
+
+// ========== USER MODEL ==========
+model User {
+  id              String   @id @default(cuid())
+  email           String   
+  password        String   // Hash bcrypt
+  firstName       String
+  lastName        String
+  role            String   @default("staff") // admin, manager, staff, delivery
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Multi-Tenant
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  // Relações
+  orders          Order[]
+  deliveries      Delivery[]
+
+  @@unique([email, tenantId]) // Email único por tenant
+  @@index([tenantId])
+  @@map("users")
+}
+
+// ========== CUSTOMER MODEL ==========
+model Customer {
+  id              String   @id @default(cuid())
+  name            String
+  email           String?
+  phone           String
+  address         String?
+  city            String?
+  state           String?
+  zipCode         String?
+  notes           String?
+  ltv             Decimal  @db.Decimal(10, 2) @default(0) // Lifetime Value acumulado
+  totalOrders     Int      @default(0)                    // Contagem de pedidos
+  lastOrderAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Multi-Tenant
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Relações
+  orders          Order[]
+
+  @@index([tenantId])
+  @@map("customers")
+}
+
+// ========== PRODUCT MODEL ==========
+model Product {
+  id              String   @id @default(cuid())
+  name            String
+  description     String?
+  sku             String
+  price           Decimal  @db.Decimal(10, 2)     // Preço de venda
+  costPrice       Decimal  @db.Decimal(10, 2) @default(0) // CMV calculado
+  laborCost       Decimal  @db.Decimal(10, 2) @default(0) // Mão de obra fixa por unidade
+  category        String?
+  productType     String   @default("simple")     // simple | combo
+  active          Boolean  @default(true)
+  stock           Int      @default(0)
+  // Regra de combo: opções visuais que o cliente vê (ex: 3 proteínas)
+  // Formato: [{ group: "proteina", label: "Frango", ingredientId: "xxx" }, ...]
+  comboOptions    Json?
+  // Embalagem padrão associada (ingredientId da embalagem "divisória")
+  packagingIngredientId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Multi-Tenant
+  tenantId        String
+  tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Relações
+  orderItems      OrderItem[]
+  technicalSheet  ProductIngredient[]
+  pricingRules    PricingRule[]
+
+  @@unique([sku, tenantId])
+  @@index([tenantId])
+  @@map("products")
+}
+
+// ========== PRODUCT INGREDIENT (Ficha Técnica) ==========
+// Tabela de junção com quantidade, custo calculado e flag de proteína principal
+model ProductIngredient {
+  id              String     @id @default(cuid())
+  quantity        Decimal    @db.Decimal(10, 4)   // Quantidade usada na receita
+  unitCost        Decimal    @db.Decimal(10, 4)   // Custo unitário no momento do cadastro
+  totalCost       Decimal    @db.Decimal(10, 4)   // quantity × unitCost × (1 + breakageFactor/100)
+  isMainProtein   Boolean    @default(false)       // Marca a proteína principal do combo
+  isPackaging     Boolean    @default(false)       // Marca ingrediente como embalagem
+  notes           String?
+
+  // Multi-Tenant (herdado do produto — facilita queries de relatório)
+  tenantId        String
+  tenant          Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Relações
+  productId       String
+  product         Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  ingredientId    String
+  ingredient      Ingredient @relation(fields: [ingredientId], references: [id])
+
+  @@unique([productId, ingredientId])
+  @@index([tenantId])
+  @@index([productId])
+  @@index([ingredientId])
+  @@map("product_ingredients")
+}
+
+// ========== ORDER MODEL ==========
+model Order {
+  id              String   @id @default(cuid())
+  orderNumber     String
+  status          String   @default("pending") // pending, confirmed, preparing, ready, dispatched, delivered, cancelled
+  orderType       String   @default("delivery") // delivery | balcao | mesa
+  totalAmount     Decimal  @db.Decimal(10, 2)
+  discount        Decimal  @db.Decimal(10, 2) @default(0)
+  paymentMethod   String   @default("cash")    // cash | credit | debit | pix | voucher
+  paymentStatus   String   @default("pending") // pending | paid
+  observations    String?
+  printedKitchen  Boolean  @default(false)
+  printedDelivery Boolean  @default(false)
+  // Distância em km para cálculo logístico
+  distanceKm      Decimal? @db.Decimal(8, 2)
+  // Endereço de entrega denormalizado para histórico
+  deliveryAddress String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Multi-Tenant
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Relações
+  customerId      String?
+  customer        Customer? @relation(fields: [customerId], references: [id])
+
+  createdById     String
+  createdBy       User     @relation(fields: [createdById], references: [id])
+
+  // Canal de venda pelo qual o pedido veio
+  salesChannelId  String?
+  salesChannel    SalesChannel? @relation(fields: [salesChannelId], references: [id])
+
+  orderItems      OrderItem[]
+  delivery        Delivery?
+  deliveryQuote   DeliveryQuote?
+
+  @@unique([orderNumber, tenantId])
+  @@index([tenantId])
+  @@index([customerId])
+  @@index([createdById])
+  @@map("orders")
+}
+
+// ========== ORDER ITEM MODEL ==========
+model OrderItem {
+  id                  String   @id @default(cuid())
+  quantity            Int
+  unitPrice           Decimal  @db.Decimal(10, 2)
+  subtotal            Decimal  @db.Decimal(10, 2)
+  observations        String?                       // ex: "sem cebola"
+  selectedProteinId   String?                       // ingredientId da proteína escolhida no combo
+  selectedProteinName String?                       // nome para denormalizar na impressão
+
+  // Relações
+  orderId         String
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  productId       String
+  product         Product  @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+// ========== DELIVERY MODEL ==========
+model Delivery {
+  id              String   @id @default(cuid())
+  status          String   @default("pending") // pending, assigned, in_transit, delivered, failed
+  estimatedTime   DateTime?
+  actualTime      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Multi-Tenant
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Relações
+  orderId         String   @unique
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  assignedToId    String?
+  assignedTo      User?    @relation(fields: [assignedToId], references: [id])
+
+  @@index([tenantId])
+  @@index([assignedToId])
+  @@map("deliveries")
+}
+
+// ========== INGREDIENT MODEL ==========
+model Ingredient {
+  id              String   @id @default(cuid())
+  name            String
+  description     String?
+  sku             String
+  unit            String   // kg, l, un, g, ml, etc
+  price           Decimal  @db.Decimal(10, 2) // Preço unitário
+  breakageFactor  Decimal  @db.Decimal(5, 2) @default(0.00) // % de perda/quebra
+  stock           Int      @default(0)
+  minimumStock    Int      @default(0)
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Multi-Tenant
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Relações
+  productIngredients ProductIngredient[]
+  invoiceItems       InvoiceItem[]
+
+  @@unique([sku, tenantId])
+  @@index([tenantId])
+  @@map("ingredients")
+}
+
+// ========== DRE CATEGORY MODEL ==========
+// Categorias do DRE (ex: CMV, Mão de Obra, Aluguel, Energia...)
+model DreCategory {
+  id              String   @id @default(cuid())
+  name            String                        // ex: "Custo de Mercadoria Vendida"
+  code            String                        // ex: "CMV", "MOD", "ALUGUEL"
+  type            String                        // revenue | expense | cogs
+  parentId        String?                       // Para sub-categorias (DRE hierárquico)
+  parent          DreCategory?  @relation("DreCategoryHierarchy", fields: [parentId], references: [id])
+  children        DreCategory[] @relation("DreCategoryHierarchy")
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Multi-Tenant
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Relações
+  accountsPayable AccountPayable[]
+
+  @@unique([code, tenantId])
+  @@index([tenantId])
+  @@map("dre_categories")
+}
+
+// ========== CASH REGISTER (CAIXA) ==========
+// Representa uma sessão de caixa aberta/fechada
+model CashRegister {
+  id              String   @id @default(cuid())
+  openedAt        DateTime @default(now())
+  closedAt        DateTime?
+  openingBalance  Decimal  @db.Decimal(10, 2) @default(0)
+  closingBalance  Decimal? @db.Decimal(10, 2)
+  expectedBalance Decimal? @db.Decimal(10, 2)
+  difference      Decimal? @db.Decimal(10, 2)   // closingBalance - expectedBalance
+  status          String   @default("open")      // open | closed
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Multi-Tenant
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Relações
+  openedById      String
+  cashEntries     CashEntry[]
+
+  @@index([tenantId])
+  @@map("cash_registers")
+}
+
+// ========== CASH ENTRY (LANÇAMENTO DE CAIXA) ==========
+// Cada movimentação dentro de uma sessão de caixa
+model CashEntry {
+  id              String       @id @default(cuid())
+  type            String                          // income | expense
+  amount          Decimal      @db.Decimal(10, 2)
+  description     String
+  paymentMethod   String       @default("cash")   // cash | credit | debit | pix
+  referenceType   String?                         // order | invoice | manual
+  referenceId     String?                         // id do pedido/nota vinculado
+  createdAt       DateTime     @default(now())
+
+  // Relações
+  cashRegisterId  String
+  cashRegister    CashRegister @relation(fields: [cashRegisterId], references: [id], onDelete: Cascade)
+
+  @@index([cashRegisterId])
+  @@map("cash_entries")
+}
+
+// ========== ACCOUNT PAYABLE (CONTAS A PAGAR) ==========
+model AccountPayable {
+  id              String      @id @default(cuid())
+  description     String
+  supplierName    String
+  supplierDoc     String?                         // CNPJ/CPF do fornecedor
+  amount          Decimal     @db.Decimal(10, 2)
+  amountPaid      Decimal     @db.Decimal(10, 2) @default(0)
+  dueDate         DateTime
+  paidAt          DateTime?
+  status          String      @default("pending") // pending | partial | paid | overdue
+  invoiceNumber   String?                         // Número da NF
+  invoiceId       String?                         // FK para Invoice se vier de NF
+  notes           String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  // Multi-Tenant
+  tenantId        String
+  tenant          Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Categoria DRE
+  dreCategoryId   String?
+  dreCategory     DreCategory? @relation(fields: [dreCategoryId], references: [id])
+
+  @@index([tenantId])
+  @@index([dreCategoryId])
+  @@map("accounts_payable")
+}
+
+// ========== INVOICE (NOTA FISCAL) ==========
+// Cabeçalho da NF importada (XML SEFAZ)
+model Invoice {
+  id              String        @id @default(cuid())
+  chaveAcesso     String        @unique            // Chave de 44 dígitos da NF-e
+  numero          String
+  serie           String
+  emitente        String                           // Razão social do fornecedor
+  emitenteDoc     String                           // CNPJ do emitente
+  emitenteCidade  String?
+  emitentUF       String?
+  destinatarioDoc String?                          // CNPJ do destinatário (tenant)
+  dataEmissao     DateTime
+  valorTotal      Decimal       @db.Decimal(10, 2)
+  valorFrete      Decimal       @db.Decimal(10, 2) @default(0)
+  valorDesconto   Decimal       @db.Decimal(10, 2) @default(0)
+  valorImposto    Decimal       @db.Decimal(10, 2) @default(0)
+  status          String        @default("imported") // imported | processed | cancelled
+  xmlRaw          String?       @db.Text            // XML original armazenado
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Multi-Tenant
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Relações
+  items           InvoiceItem[]
+
+  @@index([tenantId])
+  @@map("invoices")
+}
+
+// ========== INVOICE ITEM (ITENS DA NOTA FISCAL) ==========
+model InvoiceItem {
+  id              String    @id @default(cuid())
+  numeroItem      Int
+  codigoProduto   String                           // Código do produto no fornecedor
+  descricao       String
+  ncm             String?                          // NCM (classificação fiscal)
+  cfop            String?                          // CFOP
+  unit            String
+  quantity        Decimal   @db.Decimal(10, 4)
+  unitPrice       Decimal   @db.Decimal(10, 4)    // Preço unitário na nota
+  totalPrice      Decimal   @db.Decimal(10, 2)
+  // Link com ingrediente interno (mapeado durante a importação)
+  ingredientId    String?
+  ingredient      Ingredient? @relation(fields: [ingredientId], references: [id])
+
+  // Relações
+  invoiceId       String
+  invoice         Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([ingredientId])
+  @@map("invoice_items")
+}
+
+// ========== SALES CHANNEL ==========
+// Define cada canal de venda (iFood, WhatsApp, Balcão, etc.)
+model SalesChannel {
+  id              String   @id @default(cuid())
+  name            String                          // ex: "iFood", "WhatsApp", "Balcao"
+  slug            String                          // ex: "ifood", "whatsapp", "balcao"
+  active          Boolean  @default(true)
+  // Taxa da plataforma em % (ex: 27.0 para iFood)
+  platformFeePerc Decimal  @db.Decimal(5, 2) @default(0)
+  // Taxa fixa por pedido em R$ (ex: R$1.00 por pedido no app)
+  platformFeeFixed Decimal @db.Decimal(10, 2) @default(0)
+  // Taxa de pagamento em % (maquininha, gateway, etc.)
+  paymentFeePerc  Decimal  @db.Decimal(5, 2) @default(0)
+  // Margem mínima desejada após todas as taxas (%)
+  targetMarginPerc Decimal @db.Decimal(5, 2) @default(30)
+  // Multiplicador manual extra (ex: 1.05 = +5% sobre o calculado)
+  manualMultiplier Decimal @db.Decimal(5, 4) @default(1.0000)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Multi-Tenant
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Relações
+  pricingRules    PricingRule[]
+  orders          Order[]
+
+  @@unique([slug, tenantId])
+  @@index([tenantId])
+  @@map("sales_channels")
+}
+
+// ========== PRICING RULE ==========
+// Preço calculado de cada produto por canal (snapshot para auditoria)
+model PricingRule {
+  id              String   @id @default(cuid())
+  // Preço de custo total (CMV + mão de obra)
+  costPrice       Decimal  @db.Decimal(10, 4)
+  // Markup calculado pelo sistema
+  markupPerc      Decimal  @db.Decimal(7, 4)
+  // Preço sugerido pelo sistema (antes do arredondamento)
+  suggestedPrice  Decimal  @db.Decimal(10, 2)
+  // Preço final aprovado (pode ser editado manualmente)
+  finalPrice      Decimal  @db.Decimal(10, 2)
+  // Margem real resultante após taxas (%)
+  realMarginPerc  Decimal  @db.Decimal(7, 4)
+  active          Boolean  @default(true)
+  calculatedAt    DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Multi-Tenant
+  tenantId        String
+  tenant          Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Relações
+  productId       String
+  product         Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  channelId       String
+  salesChannel    SalesChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, channelId])
+  @@index([tenantId])
+  @@index([productId])
+  @@index([channelId])
+  @@map("pricing_rules")
+}
+
+// ========== FLEET (FROTA PRÓPRIA) ==========
+// Cada motoboy ou veículo da frota
+model Fleet {
+  id              String   @id @default(cuid())
+  name            String                          // Nome do motoboy / veículo
+  vehicleType     String   @default("moto")       // moto | carro | bicicleta
+  // Consumo médio em km/l (ou km/kWh para elétrico)
+  kmPerLiter      Decimal  @db.Decimal(6, 2) @default(20)
+  // Custo médio do combustível por litro em R$
+  fuelCostPerLiter Decimal @db.Decimal(6, 2) @default(6.50)
+  // Taxa fixa paga ao motoboy por corrida (R$)
+  deliveryFee     Decimal  @db.Decimal(10, 2) @default(0)
+  // Taxa por km rodado além do raio base (R$/km)
+  feePerKm        Decimal  @db.Decimal(6, 2) @default(0)
+  // Raio base em km já coberto pela deliveryFee
+  baseRadiusKm    Decimal  @db.Decimal(6, 2) @default(3)
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Multi-Tenant
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Relações
+  deliveryQuotes  DeliveryQuote[]
+
+  @@index([tenantId])
+  @@map("fleet")
+}
+
+// ========== DELIVERY QUOTE (COTAÇÃO DE ENTREGA) ==========
+// Snapshot da decisão logística no momento do fechamento do pedido
+model DeliveryQuote {
+  id                  String   @id @default(cuid())
+  distanceKm          Decimal  @db.Decimal(8, 2)
+  // Custo calculado para frota própria
+  ownFleetCost        Decimal  @db.Decimal(10, 2)
+  ownFleetBreakdown   Json                         // { fuel, driverFee, extraKmFee }
+  // Custo estimado do app (iFood/Rappi taxa reversa)
+  appDeliveryCost     Decimal  @db.Decimal(10, 2)
+  // Recomendação do sistema
+  recommendation      String                       // own_fleet | app_delivery
+  // Economia estimada em R$ ao seguir a recomendação
+  estimatedSaving     Decimal  @db.Decimal(10, 2)
+  // Decisão final tomada pelo operador
+  chosenOption        String?                      // own_fleet | app_delivery
+  decidedAt           DateTime?
+  createdAt           DateTime @default(now())
+
+  // Multi-Tenant
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Relações
+  orderId         String   @unique
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  fleetId         String?
+  fleet           Fleet?   @relation(fields: [fleetId], references: [id])
+
+  @@index([tenantId])
+  @@map("delivery_quotes")
+}

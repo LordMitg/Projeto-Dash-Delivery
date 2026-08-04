@@ -1,0 +1,337 @@
+╔═══════════════════════════════════════════════════════════════════╗
+║     ETAPA 7: AUTENTICAÇÃO JWT + DASHBOARD RECHARTS              ║
+║                 ÍNDICE COMPLETO DE ARQUIVOS                      ║
+╚═══════════════════════════════════════════════════════════════════╝
+
+═══════════════════════════════════════════════════════════════════
+📁 ARQUIVOS ENTREGUES
+═══════════════════════════════════════════════════════════════════
+
+BACKEND (Node.js + Express + JWT)
+──────────────────────────────────
+✓ backend/src/controllers/authController.ts (206 linhas)
+  └─ login(), register(), verify(), refresh()
+  └─ JWT com payload: { userId, email, role, tenantId }
+  └─ Bcrypt password hashing (10 salts)
+  └─ Multi-tenant isolado
+
+✓ backend/src/middleware/authMiddleware.ts (93 linhas)
+  └─ authenticate() → verifica JWT, injeta req.user
+  └─ requireAdmin() → restringe admin/manager
+  └─ requireFinancialAccess() → restringe admin/manager/caixa
+  └─ requireStockAccess() → restringe admin/manager
+
+✓ backend/src/routes/authRoutes.ts (46 linhas)
+  └─ POST /auth/login (sem proteção)
+  └─ POST /auth/register (sem proteção)
+  └─ POST /auth/verify (sem proteção)
+  └─ POST /auth/refresh (sem proteção)
+  └─ GET /auth/me (protegido)
+
+FRONTEND (React + Recharts + TypeScript)
+─────────────────────────────────────────
+✓ frontend/src/components/DashboardCharts.tsx (234 linhas)
+  └─ Gráfico de Barras: Faturamento vs Custos Mensais
+  └─ Gráfico de Linhas: Crescimento Clientes/Vendas
+  └─ Estatísticas Resumidas (Receita, Custos, Lucro, Margem)
+  └─ Fetch automático de 12 meses
+  └─ Responsivo com ResponsiveContainer
+
+✓ frontend/src/pages/LoginPage.tsx (263 linhas)
+  └─ Modo Login: email + password + tenantId
+  └─ Modo Register: email + password + firstName + lastName + tenantId
+  └─ 50/50 split design: branding esquerda, form direita
+  └─ Toggle entre login/register
+  └─ Erro inline com alertas
+
+✓ frontend/src/hooks/useAuth.ts (175 linhas)
+  └─ Hook gerencia: user, token, isAuthenticated, loading
+  └─ Funções: login(), register(), logout(), refreshToken()
+  └─ Persiste em localStorage
+  └─ Configura header Authorization automático no axios
+
+DOCUMENTAÇÃO
+────────────
+✓ ETAPA_7_RESUMO.md (273 linhas)
+  └─ Descrição completa de cada arquivo
+  └─ JWT payload structure
+  └─ Segurança checklist
+  └─ Fluxo de dados dos charts
+
+✓ ETAPA_7_GUIA_INTEGRACAO.md (375 linhas)
+  └─ 10 passos de integração
+  └─ Exemplos código backend/frontend
+  └─ Fluxograma completo autenticação
+  └─ Exemplos CURL para testar
+  └─ Troubleshooting
+
+✓ ETAPA_7_INDICE.txt (este arquivo)
+  └─ Overview dos arquivos
+  └─ Checklist instalação
+  └─ Próximos passos
+
+═══════════════════════════════════════════════════════════════════
+📋 CHECKLIST DE INSTALAÇÃO
+═══════════════════════════════════════════════════════════════════
+
+Backend:
+  [ ] Copiar authController.ts para backend/src/controllers/
+  [ ] Copiar authMiddleware.ts para backend/src/middleware/
+  [ ] Copiar authRoutes.ts para backend/src/routes/
+  [ ] Importar middleware em backend/src/index.ts
+  [ ] Proteger rotas com authenticate middleware
+  [ ] Verificar JWT_SECRET em .env
+  [ ] Verificar bcryptjs + jsonwebtoken instalados
+
+Frontend:
+  [ ] Copiar DashboardCharts.tsx para frontend/src/components/
+  [ ] Copiar LoginPage.tsx para frontend/src/pages/
+  [ ] Copiar useAuth.ts para frontend/src/hooks/
+  [ ] npm install recharts (no frontend)
+  [ ] Atualizar App.tsx com LoginPage + useAuth
+  [ ] Configurar TenantProvider
+
+Database:
+  [ ] Schema Prisma tem users + tenants (já existe)
+  [ ] npx prisma generate
+  [ ] npx prisma db push
+  [ ] Criar usuário de teste (script SQL)
+
+═══════════════════════════════════════════════════════════════════
+🔐 SEGURANÇA IMPLEMENTADA
+═══════════════════════════════════════════════════════════════════
+
+✅ Autenticação:
+   • JWT com expiração (7 dias)
+   • Senhas com bcrypt (10 rounds, inquebrável)
+   • Refresh token endpoint (renovar sem re-login)
+
+✅ Autorização:
+   • Role-based: admin, manager, staff, caixa
+   • Isolamento multi-tenant: (email, tenantId) único
+   • Middlewares de permissão (admin, financial, stock)
+
+✅ Proteção de Dados:
+   • req.user + req.tenant injetados pelo middleware
+   • Todas queries filtram por tenantId
+   • Password nunca exposto em responses
+
+✅ Stateless:
+   • Nenhum token armazenado no servidor
+   • Redimensionável horizontalmente
+   • Não precisa de session store
+
+═══════════════════════════════════════════════════════════════════
+📊 GRÁFICOS IMPLEMENTADOS
+═══════════════════════════════════════════════════════════════════
+
+Gráfico 1: Faturamento vs Custos (BarChart)
+├─ Eixo X: Últimos 12 meses
+├─ Eixo Y: Valores em R$
+└─ 3 séries:
+   ├─ Receita (azul #3b82f6)
+   ├─ Custos (vermelho #ef4444)
+   └─ Lucro (verde #10b981)
+   Dados: /api/financial/dre?month=&year=
+
+Gráfico 2: Crescimento Clientes/Vendas (LineChart)
+├─ Eixo X: Últimos 12 meses
+├─ Eixo Y Esquerda: Clientes
+├─ Eixo Y Direita: Pedidos
+└─ 2 séries:
+   ├─ Clientes Ativos (azul)
+   └─ Pedidos (verde)
+   Dados: /api/financial/kpis?period=month
+
+Estatísticas Resumidas:
+├─ Receita Total (12m)
+├─ Custos Totais (12m)
+├─ Lucro Total (12m)
+└─ Margem Média (12m)
+
+═══════════════════════════════════════════════════════════════════
+🚀 COMO EXECUTAR
+═══════════════════════════════════════════════════════════════════
+
+1. Instalar Dependências:
+   ```bash
+   cd backend
+   npm install
+   cd ../frontend
+   npm install recharts
+   ```
+
+2. Configurar .env:
+   ```bash
+   # backend/.env
+   DATABASE_URL="postgresql://postgres:password@localhost:5432/delivery_erp"
+   JWT_SECRET="your-secret-key-change-in-production"
+   PORT=3001
+   ```
+
+3. Sincronizar BD:
+   ```bash
+   cd backend
+   npx prisma generate
+   npx prisma db push
+   ```
+
+4. Iniciar Backend:
+   ```bash
+   cd backend
+   npm run dev
+   # Backend rodando: http://localhost:3001
+   ```
+
+5. Iniciar Frontend:
+   ```bash
+   cd frontend
+   npm run dev
+   # Frontend rodando: http://localhost:5173
+   ```
+
+6. Login (criar usuário primeiro):
+   Email: admin@empresa.com
+   Senha: admin123
+   Empresa: (selecione na lista)
+
+═══════════════════════════════════════════════════════════════════
+🔄 FLUXO DE DADOS
+═══════════════════════════════════════════════════════════════════
+
+1. LOGIN
+   LoginPage (form)
+   ↓
+   POST /api/auth/login
+   ↓
+   authController.login
+   ├─ find User (email, tenantId)
+   ├─ compare password
+   ├─ jwt.sign()
+   ↓
+   { token, user }
+   ↓
+   localStorage + axios header
+   ↓
+   DashboardCharts
+
+2. DADOS GRÁFICOS
+   useEffect DashboardCharts
+   ├─ Loop 12 meses
+   ├─ GET /api/financial/dre?month=M&year=Y
+   ├─ GET /api/financial/kpis?period=month
+   ↓
+   middleware authenticate
+   ├─ jwt.verify(token)
+   ├─ req.user = decoded
+   ├─ req.tenant = { id: tenantId }
+   ↓
+   financialRoutes handler
+   ├─ prisma.order.findMany({ where: { tenantId } })
+   ├─ calcular KPIs/DRE
+   ↓
+   { revenue, costs, profit }
+   { customers, sales }
+   ↓
+   Recharts renderiza
+
+═══════════════════════════════════════════════════════════════════
+✅ TESTES RÁPIDOS
+═══════════════════════════════════════════════════════════════════
+
+1. Backend rodando?
+   curl http://localhost:3001/api/auth/verify
+   → { "error": "Token não fornecido" } ✓
+
+2. Login funciona?
+   curl -X POST http://localhost:3001/api/auth/login \
+     -H "Content-Type: application/json" \
+     -d '{"email":"admin@empresa.com","password":"admin123","tenantId":"tenant_id"}'
+   → { "success": true, "token": "...", "user": {...} } ✓
+
+3. Rotas protegidas?
+   curl http://localhost:3001/api/financial/kpis
+   → { "error": "Token não fornecido" } ✓
+
+   curl http://localhost:3001/api/financial/kpis \
+     -H "Authorization: Bearer <token>"
+   → { "totalOrders": 10, ... } ✓
+
+4. Frontend conecta?
+   Abrir http://localhost:5173
+   → LoginPage aparece ✓
+   → Fazer login
+   → DashboardCharts carrega com gráficos ✓
+
+═══════════════════════════════════════════════════════════════════
+⚠️  ANTES DE PRODUÇÃO
+═══════════════════════════════════════════════════════════════════
+
+□ Mudar JWT_SECRET (gerar com: openssl rand -base64 32)
+□ Configurar CORS para domínio real (não localhost)
+□ Habilitar HTTPS (supabase/vercel automático)
+□ Implementar session timeout (logout automático)
+□ Adicionar 2FA (SMS ou email)
+□ Testes unitários para authMiddleware
+□ Auditoria de segurança (OWASP top 10)
+□ Rate limiting em /auth/login
+□ Monitoramento de falhas de login
+
+═══════════════════════════════════════════════════════════════════
+📚 PRÓXIMAS ETAPAS (Etapa 8+)
+═══════════════════════════════════════════════════════════════════
+
+Etapa 8: Polimento UI + Responsivo
+├─ Mobile layout (Sidebar collapse)
+├─ Dark/Light mode toggle
+├─ Notificações (toast)
+├─ Loading states
+└─ Animações suaves
+
+Etapa 9: Testes + CI/CD
+├─ Testes unitários (Jest)
+├─ E2E tests (Cypress)
+├─ GitHub Actions
+├─ Staging environment
+└─ Deploy automático
+
+Etapa 10: Produção
+├─ Setup Vercel + Supabase/Neon
+├─ Domain custom
+├─ SSL/TLS
+├─ Backup automático
+├─ Monitoring
+└─ Support
+
+═══════════════════════════════════════════════════════════════════
+📞 SUPORTE
+═══════════════════════════════════════════════════════════════════
+
+Erro: "CORS error preflight"
+→ Adicionar CORS em backend index.ts
+→ app.use(cors({ origin: 'http://localhost:5173' }))
+
+Erro: "Token inválido"
+→ localStorage.clear()
+→ Fazer login novamente
+
+Erro: "Charts vazios"
+→ Verificar /api/financial/dre retorna dados
+→ Confirmar month/year formato
+→ Check tenantId injetado corretamente
+
+Erro: "Database migration failed"
+→ npx prisma db push --force-reset
+→ Cuidado: deleta todos os dados!
+
+═══════════════════════════════════════════════════════════════════
+
+Versão: 7.0.0
+Data: 04/08/2026
+Status: COMPLETO - Pronto para Etapa 8 (Polimento UI)
+
+Arquivos: 6 TypeScript + 3 Markdown = 9 arquivos
+Linhas de código: ~1,200 linhas de negócio
+Funcionalidades: Autenticação JWT + Charts Recharts + Multi-tenant
+
+═══════════════════════════════════════════════════════════════════

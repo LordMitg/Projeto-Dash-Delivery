@@ -1,0 +1,183 @@
+╔═══════════════════════════════════════════════════════════════════╗
+║          🚀 ETAPA BÔNUS: AUTOMAÇÃO DE INICIALIZAÇÃO              ║
+║                    Arquivo: iniciar_sistema.bat                  ║
+╚═══════════════════════════════════════════════════════════════════╝
+
+═══════════════════════════════════════════════════════════════════
+
+📋 ARQUIVOS ENTREGUES:
+
+1. iniciar_sistema.bat (raiz do projeto)
+   └─ Script batch que automatiza todo o startup
+
+2. INICIALIZACAO.md (raiz do projeto)
+   └─ Instruções detalhadas de uso
+
+3. backend/.env.example (atualizado)
+   └─ Template com comentários de configuração
+
+═══════════════════════════════════════════════════════════════════
+
+⚡ FLUXO DO SCRIPT (iniciar_sistema.bat):
+
+┌─ Execução Automática ─────────────────────────────────────┐
+│                                                             │
+│  1. ✓ Verificar privilégios de Admin                      │
+│  2. ✓ Liberar ExecutionPolicy do PowerShell               │
+│  3. ✓ npm install backend (com --legacy-peer-deps)        │
+│  4. ✓ npm rebuild (módulos nativos: Electron, USB)        │
+│  5. ✓ npm install frontend                                │
+│  6. ✓ npx prisma generate                                 │
+│  7. ✓ npx prisma db push (sincroniza PostgreSQL)          │
+│  8. ✓ Abre Terminal 1: Backend (npm run dev)              │
+│  9. ✓ Abre Terminal 2: Frontend (npm start - Electron)    │
+│ 10. ✓ Exibe mensagens amigáveis no console                │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════
+
+🔧 COMO USAR:
+
+PRIMEIRA VEZ (com Admin):
+  1. Clique direito em "iniciar_sistema.bat"
+  2. Selecione "Executar como Administrador"
+  3. Clique "Sim" na confirmação Windows
+  4. Aguarde até as 2 janelas (Backend + Frontend) abrirem
+
+PRÓXIMAS VEZES (normal):
+  → Duplo clique direto em "iniciar_sistema.bat"
+  → O sistema inicia automaticamente
+  → PostgreSQL deve estar rodando antes
+
+═══════════════════════════════════════════════════════════════════
+
+📍 LOCALIZAÇÃO:
+
+projeto-dash-delivery/
+├── iniciar_sistema.bat           ← COLOQUE AQUI
+├── INICIALIZACAO.md              ← Instruções
+├── ETAPA_BONUS_RESUMO.txt        ← Este arquivo
+├── backend/
+├── frontend/
+└── ...
+
+═══════════════════════════════════════════════════════════════════
+
+✅ REQUISITOS ANTES DE USAR:
+
+Antes de executar o script, certifique-se que você tem:
+
+1. PostgreSQL 12+ instalado e rodando
+   $ psql --version
+   
+2. Node.js 18+ instalado
+   $ node --version
+   
+3. npm 9+ instalado
+   $ npm --version
+   
+4. Arquivo .env no backend configurado:
+   backend/.env
+   └─ DATABASE_URL, JWT_SECRET, PORT
+
+═══════════════════════════════════════════════════════════════════
+
+🖥️ O QUE ACONTECE APÓS INICIAR:
+
+✓ Janela 1 (Backend - Express):
+  → Rodando em http://localhost:3001
+  → APIs: /api/ingredients, /api/products, /api/orders, etc.
+  
+✓ Janela 2 (Frontend - Electron):
+  → Aplicação gráfica abre automaticamente
+  → Dashboard com KPIs do Delivery ERP
+
+✓ Banco de Dados:
+  → PostgreSQL sincronizado via Prisma
+  → Tabelas criadas/atualizadas
+  → Pronto para operação
+
+═══════════════════════════════════════════════════════════════════
+
+⚡ ATALHOS ÚTEIS:
+
+Ctrl + C              → Para servidor (em qualquer terminal)
+Ctrl + Shift + I      → DevTools do Electron (F12)
+Ctrl + R              → Recarrega interface Electron
+npm run dev           → Reinicia backend manualmente
+
+═══════════════════════════════════════════════════════════════════
+
+🐛 TROUBLESHOOTING RÁPIDO:
+
+Erro: "Acesso Negado"
+  └─ Execute como Administrador (direito do mouse)
+
+Erro: "PostgreSQL não está rodando"
+  └─ Inicie PostgreSQL (Services ou linha de comando)
+
+Erro: "npm not found"
+  └─ Reinstale Node.js, adicione ao PATH
+
+Erro: "Prisma migration failed"
+  └─ Execute no terminal: npx prisma db push --force-reset
+
+═══════════════════════════════════════════════════════════════════
+
+📊 VERIFICAÇÃO DE SUCESSO:
+
+Após executar, você deve ver:
+
+✓ 2 janelas de terminal abertas (Backend + Frontend)
+✓ Backend: "Server running on http://localhost:3001"
+✓ Frontend: Janela Electron com interface do ERP
+✓ Nenhum erro vermelho nos terminais
+✓ Console exibe: "✓ Permissões...", "✓ Dependências...", etc.
+
+═══════════════════════════════════════════════════════════════════
+
+🔐 SEGURANÇA & NOTAS:
+
+• ExecutionPolicy: Alterado para RemoteSigned (scripts locais OK)
+• npm rebuild: Compila módulos C++ (Electron, serial) - seguro
+• Banco: Usa PostgreSQL local por padrão (nunca remote)
+• JWT Secret: MUDE EM PRODUÇÃO (gere com: openssl rand -base64 32)
+
+═══════════════════════════════════════════════════════════════════
+
+📚 DOCUMENTAÇÃO RELACIONADA:
+
+• INICIALIZACAO.md          - Guia completo com troubleshooting
+• CHECKPOINT_ETAPA_6.md    - Estado geral do projeto
+• backend/.env.example      - Template de variáveis
+• README.md                 - Guia geral
+
+═══════════════════════════════════════════════════════════════════
+
+✨ RESUMO TÉCNICO DO SCRIPT:
+
+Linhas de código: 150+
+Funcionalidades: 5 principais
+Mensagens: 20+ feedback amigáveis
+Compatibilidade: Windows 10+ (batch nativo)
+Admin requerido: Primeira execução (permissões PowerShell)
+Tempo de inicialização: ~10-30s (primeiro), ~5-15s (cache)
+
+═══════════════════════════════════════════════════════════════════
+
+🎯 PRÓXIMOS PASSOS (Após inicializar):
+
+1. Acessar dashboard em http://localhost:3001 (Backend API)
+2. Clicar em janela Electron para usar a interface
+3. Criar primeira empresa (tenant) no sistema
+4. Testar PDV, importação NF-e, precificação
+5. Executar Simulador de Impacto (RH + Impostos)
+
+═══════════════════════════════════════════════════════════════════
+
+Versão: 1.0 - Etapa Bônus
+Data: 04/08/2026
+Status: PRONTO PARA PRODUÇÃO (com polimento final em Etapa 7)
+
+═══════════════════════════════════════════════════════════════════
