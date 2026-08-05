@@ -1,107 +1,129 @@
 @echo off
-chcp 65001 >nul
 setlocal enabledelayedexpansion
 
-REM =========================================
-REM TRAVA DE SEGURANÇA 1: FORÇAR A PASTA EXATA
-REM Isso impede o bug do System32 no modo Administrador
+REM Forca o script a rodar na pasta onde ele esta salvo
 cd /d "%~dp0"
-REM =========================================
 
 cls
 echo.
-echo ╔═══════════════════════════════════════════════════════════╗
-echo ║          🚚 DASH DELIVERY ERP - INICIALIZAÇÃO             ║
-echo ║                   Multi-Tenant v6.0.0                     ║
-echo ╚═══════════════════════════════════════════════════════════╝
+echo =======================================================
+echo            DASH DELIVERY ERP - INICIALIZACAO
+echo                    Multi-Tenant v6.0.0
+echo =======================================================
 echo.
 
-REM =========================================
-REM TRAVA DE SEGURANÇA 2: CHECAGEM DE ADMIN SEM BLOCO (Evita crash)
-REM =========================================
+REM Verificar se esta rodando como Administrador
 net session >nul 2>&1
-if %errorlevel% equ 0 goto admin_ok
-
-echo ⚠️  AVISO: Este script deve ser executado como Administrador!
-echo.
-echo    Clique com o botao direito no arquivo e selecione
-echo    "Executar como Administrador"
-echo.
-pause
-exit /b
-
-:admin_ok
-echo ✓ Permissoes de Administrador detectadas.
-echo.
-
-echo 🔓 Liberando permissoes de build...
-powershell -Command "Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force" 2>nul
-echo.
-
-REM =========================================
-REM 2. VERIFICAR E INSTALAR DEPENDENCIAS BACKEND
-REM =========================================
-echo 📦 Verificando pasta BACKEND...
-if not exist "backend" (
-    echo ❌ ERRO: A pasta 'backend' nao foi encontrada aqui!
+if %errorlevel% neq 0 (
+    echo AVISO: Este script deve ser executado como Administrador.
+    echo Clique direito no arquivo e selecione "Executar como Administrador".
     pause
-    exit /b
+    exit /b 1
+)
+
+echo Permissoes de Administrador detectadas.
+echo.
+
+REM =========================================
+REM 1. VERIFICAR PASTA E DEPENDENCIAS DO BACKEND
+REM =========================================
+echo Verificando pasta Backend...
+if not exist "backend" (
+    echo ERRO: A pasta "backend" nao foi encontrada neste diretorio!
+    pause
+    exit /b 1
 )
 
 cd backend
-if not exist "node_modules" (
-    echo   - Instalando dependencias do backend (Isso pode demorar um pouco)...
+
+if not exist node_modules (
+    echo Instalando dependencias do Backend...
     call npm install --legacy-peer-deps
+    if %errorlevel% neq 0 (
+        echo Erro ao instalar dependencias do backend.
+        pause
+        exit /b 1
+    )
 ) else (
-    echo ✓ Backend dependencias ja instaladas.
+    echo Dependencias do Backend ja existem.
 )
 
-echo 🔨 Reconstruindo modulos nativos (se necessario)...
-call npm rebuild 2>nul
-
-echo 🗄️  Sincronizando banco de dados (Prisma)...
+REM =========================================
+REM 2. SINCRONIZAR BANCO DE DADOS
+REM =========================================
+echo.
+echo [1/2] Gerando cliente Prisma...
 call npx prisma generate
-call npx prisma db push --skip-generate
-cd ..
+if %errorlevel% neq 0 (
+    echo.
+    echo ------------------------------------------------ai
+    echo ERRO CRITICO: Falha ao executar "npx prisma generate".
+    echo Verifique se o schema.prisma existe na pasta backend/prisma.
+    echo --------------------------------------------------
+    pause
+    exit /b 1
+)
 
 echo.
-REM =========================================
-REM 4. VERIFICAR E INSTALAR DEPENDENCIAS FRONTEND
-REM =========================================
-echo 📦 Verificando pasta FRONTEND...
-if not exist "frontend" (
-    echo ❌ ERRO: A pasta 'frontend' nao foi encontrada aqui!
+echo [2/2] Sincronizando com o PostgreSQL (db push)...
+call npx prisma db push --skip-generate
+if %errorlevel% neq 0 (
+    echo.
+    echo --------------------------------------------------
+    echo AVISO/ERRO: O Banco de Dados PostgreSQL parece estar 
+    echo desligado ou inacessivel na porta 5432!
+    echo Certifique-se de que o servico do Postgres esta ativo.
+    echo --------------------------------------------------
     pause
-    exit /b
+) else (
+    echo Banco de dados sincronizado com sucesso.
+)
+
+cd ..
+
+REM =========================================
+REM 3. VERIFICAR PASTA E DEPENDENCIAS DO FRONTEND
+REM =========================================
+echo.
+echo Verificando pasta Frontend...
+if not exist "frontend" (
+    echo ERRO: A pasta "frontend" nao foi encontrada neste diretorio!
+    pause
+    exit /b 1
 )
 
 cd frontend
-if not exist "node_modules" (
-    echo   - Instalando dependencias do frontend...
+
+if not exist node_modules (
+    echo Instalando dependencias do Frontend...
     call npm install --legacy-peer-deps
+    if %errorlevel% neq 0 (
+        echo Erro ao instalar dependencias do frontend.
+        pause
+        exit /b 1
+    )
 ) else (
-    echo ✓ Frontend dependencias ja instaladas.
+    echo Dependencias do Frontend ja existem.
 )
+
 cd ..
 
 REM =========================================
-REM 5. INICIAR SERVIDOR E APLICACAO
+REM 4. INICIAR SERVIDORES
 REM =========================================
 echo.
-echo 🚀 Iniciando servidores em abas separadas...
+echo Iniciando servidores...
+echo    - Backend na porta 3001
+echo    - Frontend na porta 5173
+echo.
 
-REM Iniciar Backend
-echo ⏳ Iniciando API (Node.js)...
 start "Dash Delivery - Backend" cmd /k "cd backend && npm run dev"
-
-REM Pausa de 3 segundos para o Backend respirar antes de ligar o Front
 timeout /t 3 /nobreak >nul
-
-REM Iniciar Frontend (Electron/Vite)
-echo ⏳ Iniciando PDV (Electron)...
-start "Dash Delivery - Frontend" cmd /k "cd frontend && npm start"
+start "Dash Delivery - Frontend" cmd /k "cd frontend && npm run dev"
 
 echo.
-echo ✅ INICIALIZACAO CONCLUIDA! AS TELAS VAO ABRIR AUTOMATICAMENTE.
-echo.
+echo =========================================
+echo INICIALIZACAO CONCLUIDA COM SUCESSO!
+echo =========================================
 pause
+exit /b 0
