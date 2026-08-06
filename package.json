@@ -1,10 +1,31 @@
 {
-  "dependencies": {
-    "approve": "^0.0.12",
-    "prisma": "^7.9.1"
+  "name": "delivery-erp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ERP/PDV para Delivery - servidor local, acesso pelo navegador",
+  "scripts": {
+    "dev": "concurrently -n \"api,web\" -c \"cyan,magenta\" \"pnpm --filter delivery-erp-backend dev\" \"pnpm --filter delivery-erp-frontend dev\"",
+    "dev:api": "pnpm --filter delivery-erp-backend dev",
+    "dev:web": "pnpm --filter delivery-erp-frontend dev",
+    "build": "pnpm --filter delivery-erp-backend build && pnpm --filter delivery-erp-frontend build",
+    "start": "pnpm --filter delivery-erp-backend start",
+    "typecheck": "pnpm --filter delivery-erp-backend typecheck && pnpm --filter delivery-erp-frontend typecheck",
+    "db:generate": "pnpm --filter delivery-erp-backend db:generate",
+    "db:migrate": "pnpm --filter delivery-erp-backend db:migrate",
+    "db:push": "pnpm --filter delivery-erp-backend db:push",
+    "db:seed": "pnpm --filter delivery-erp-backend db:seed",
+    "db:studio": "pnpm --filter delivery-erp-backend db:studio",
+    "db:reset": "pnpm --filter delivery-erp-backend db:reset",
+    "setup": "pnpm install && pnpm db:generate && pnpm db:migrate && pnpm db:seed",
+    "doctor": "node scripts/doctor.mjs"
   },
-  "allowScripts": {
-    "@prisma/engines@7.9.1": true,
-    "prisma@7.9.1": true
-  }
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "embedded-postgres": "18.4.0-beta.17",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "packageManager": "pnpm@10.34.3"
 }

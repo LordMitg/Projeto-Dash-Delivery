@@ -1,7 +1,7 @@
-import { PrismaClient, Prisma } from '@prisma/client'
+import { prisma } from '../lib/prisma.js'
+import { Prisma } from '@prisma/client'
 import { parseStringPromise } from 'xml2js'
 
-const prisma = new PrismaClient()
 
 // ─── Tipos internos ──────────────────────────────────────────────────────────
 
@@ -188,7 +188,10 @@ export async function processInvoice(
         if (ingredient) {
           // Preço Médio Ponderado (PMP)
           // PMP = (estoqueAtual × preçoAtual + qtdNova × preçoNF) / (estoqueAtual + qtdNova)
-          const estoqueAtual = ingredient.stock
+          // `stock` e Decimal(12,4) no banco, entao precisa virar number antes
+          // de entrar na aritmetica — somar Decimal com number nao compila e,
+          // em runtime, concatenaria como texto.
+          const estoqueAtual = ingredient.stock.toNumber()
           const precoAtual   = ingredient.price.toNumber()
           const qtdNova      = item.quantity
           const precoNF      = item.unitPrice
@@ -201,7 +204,10 @@ export async function processInvoice(
           await tx.ingredient.update({
             where: { id: ingredient.id },
             data: {
-              stock: { increment: Math.floor(qtdNova) }, // stock é Int, arredondamos para unidades inteiras
+              // Antes era `Math.floor(qtdNova)`, que jogava fora a fracao:
+              // uma NF de 2,5 kg entrava como 2 kg e o estoque nunca fechava.
+              // Como a coluna e Decimal, gravamos a quantidade exata.
+              stock: { increment: new Prisma.Decimal(qtdNova.toFixed(4)) },
               price: new Prisma.Decimal(novoPMP.toFixed(4)),
             },
           })

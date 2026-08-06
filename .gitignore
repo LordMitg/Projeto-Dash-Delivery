@@ -7,11 +7,23 @@ node_modules/
 build/
 dist/
 *.tsbuildinfo
+.tmp/
 
-# Environment
+# Environment (o .env.example continua versionado)
 .env
 .env.local
 .env.*.local
+!.env.example
+
+# Certificados HTTPS locais gerados pelo vite-plugin-mkcert
+.mkcert/
+*.pem
+
+# Uploads de imagens do cardápio (conteúdo local, não versionado)
+backend/uploads/
+
+# PWA / Vite
+frontend/dev-dist/
 
 # IDE
 .vscode/
@@ -27,10 +39,3 @@ Thumbs.db
 logs/
 *.log
 npm-debug.log*
-
-# Prisma
-.env
-.env.production.local
-
-# Electron
-out/

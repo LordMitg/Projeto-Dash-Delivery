@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useTenant } from '../context/TenantContext';
-import axios from 'axios';
+import { apiDelete, apiGet, apiPost, apiPut, errorMessage } from '../lib/api';
 
 interface Ingredient {
   id: string;
@@ -48,8 +48,6 @@ export const IngredientsManagement: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
 
-  const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
-
   // Listar insumos
   useEffect(() => {
     if (currentTenant?.id) {
@@ -62,18 +60,14 @@ export const IngredientsManagement: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const token = localStorage.getItem('auth_token');
-      const response = await axios.get(`${API_URL}/api/ingredients`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'X-Tenant-ID': currentTenant?.id,
-        },
-      });
-
-      setIngredients(response.data.data);
+      // O cliente central injeta o JWT e resolve a URL base. Antes este
+      // componente lia `localStorage.getItem('auth_token')` — chave que nunca
+      // existiu (o token e salvo em `delivery_erp_token`), entao toda chamada
+      // saia sem autenticacao e voltava 401.
+      const data = await apiGet<Ingredient[]>('/api/ingredients');
+      setIngredients(data);
     } catch (err) {
-      console.error('[IngredientsManagement] Erro ao buscar:', err);
-      setError('Erro ao carregar insumos');
+      setError(errorMessage(err, 'Erro ao carregar insumos'));
     } finally {
       setLoading(false);
     }
@@ -84,7 +78,7 @@ export const IngredientsManagement: React.FC = () => {
     e.preventDefault();
 
     if (!formData.name || !formData.sku || !formData.unit || !formData.price) {
-      setError('Preench todos os campos obrigatórios');
+      setError('Preencha todos os campos obrigatórios');
       return;
     }
 
@@ -92,22 +86,10 @@ export const IngredientsManagement: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const token = localStorage.getItem('auth_token');
-      const headers = {
-        Authorization: `Bearer ${token}`,
-        'X-Tenant-ID': currentTenant?.id,
-      };
-
       if (editingId) {
-        // Atualizar
-        await axios.put(`${API_URL}/api/ingredients/${editingId}`, formData, {
-          headers,
-        });
+        await apiPut(`/api/ingredients/${editingId}`, formData);
       } else {
-        // Criar
-        await axios.post(`${API_URL}/api/ingredients`, formData, {
-          headers,
-        });
+        await apiPost('/api/ingredients', formData);
       }
 
       setFormData(INITIAL_FORM);
@@ -115,8 +97,7 @@ export const IngredientsManagement: React.FC = () => {
       setShowForm(false);
       await fetchIngredients();
     } catch (err) {
-      console.error('[IngredientsManagement] Erro ao salvar:', err);
-      setError('Erro ao salvar insumo');
+      setError(errorMessage(err, 'Erro ao salvar insumo'));
     } finally {
       setLoading(false);
     }
@@ -149,18 +130,10 @@ export const IngredientsManagement: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const token = localStorage.getItem('auth_token');
-      await axios.delete(`${API_URL}/api/ingredients/${id}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'X-Tenant-ID': currentTenant?.id,
-        },
-      });
-
+      await apiDelete(`/api/ingredients/${id}`);
       await fetchIngredients();
     } catch (err) {
-      console.error('[IngredientsManagement] Erro ao deletar:', err);
-      setError('Erro ao deletar insumo');
+      setError(errorMessage(err, 'Erro ao deletar insumo'));
     } finally {
       setLoading(false);
     }
@@ -288,7 +261,7 @@ export const IngredientsManagement: React.FC = () => {
 
             <div>
               <label style={{ display: 'block', marginBottom: '4px', fontWeight: 'bold' }}>
-                Preço Unitário *
+                Preço Unit��rio *
               </label>
               <input
                 type="number"

@@ -1,6 +1,6 @@
-import { PrismaClient, SalesChannel, Product } from '@prisma/client'
+import { prisma } from '../lib/prisma.js'
+import { SalesChannel, Product } from '@prisma/client'
 
-const prisma = new PrismaClient()
 
 // ---------------------------------------------------------------------------
 // TIPOS

@@ -13,8 +13,13 @@ datasource db {
 // ========== TENANT MODEL ==========
 model Tenant {
   id              String   @id @default(cuid())
-  name            String   @unique // Nome da empresa/loja
+  // Nome da loja. NAO e unico: dois donos diferentes podem ter cada um a sua
+  // "Pizzaria do Joao". A identidade tecnica fica no `slug`, esse sim unico.
+  name            String
   slug            String   @unique // URL-friendly identifier
+  // Logo da loja como data URL (~200KB), redimensionada no navegador antes do
+  // envio. Sem storage externo: cada loja tem a sua e o volume e minimo.
+  logoData        String?
   email           String
   phone           String?
   address         String?
@@ -22,11 +27,27 @@ model Tenant {
   state           String?
   zipCode         String?
   active          Boolean  @default(true)
+
+  // ---- Operação da loja (requisito 7) ----
+  // Chave geral: quando false, o PDV bloqueia novas vendas.
+  isOpen          Boolean  @default(false)
+  // Horários por dia da semana, no formato:
+  // { "mon": [{ "from": "18:00", "to": "23:30" }], "tue": [...], ... }
+  openingHours    Json?
+  // Taxa de entrega padrão, usada quando o bairro não tem taxa própria.
+  deliveryFeeBase Decimal  @db.Decimal(10, 2) @default(0)
+  // Taxas por bairro: [{ "name": "Centro", "fee": 5.00 }, ...]
+  deliveryZones   Json?
+  // Preferências de impressão da comanda (largura da bobina, vias automáticas).
+  printSettings   Json?
+
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   
   // Relações
-  users              User[]
+  // A equipe do negocio e alcancada por `memberships` (antes era `users`, que
+  // dependia do vinculo 1:1 removido).
+  memberships        Membership[]
   orders             Order[]
   products           Product[]
   deliveries         Delivery[]
@@ -41,6 +62,8 @@ model Tenant {
   pricingRules       PricingRule[]
   fleet              Fleet[]
   deliveryQuotes     DeliveryQuote[]
+  menuCategories     MenuCategory[]
+  productAddons      ProductAddon[]
 
   @@map("tenants")
 }
@@ -48,7 +71,10 @@ model Tenant {
 // ========== USER MODEL ==========
 model User {
   id              String   @id @default(cuid())
-  email           String   
+  // Unico GLOBAL. Antes era unico por loja (`@@unique([email, tenantId])`), o
+  // que obrigava uma linha `User` por loja e impedia a mesma conta de ter mais
+  // de um negocio — era o bloqueio central do multi-negocio.
+  email           String   @unique
   password        String   // Hash bcrypt
   firstName       String
   lastName        String
@@ -56,18 +82,55 @@ model User {
   active          Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
-  
-  // Multi-Tenant
-  tenantId        String
-  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  
+
+  // ---- Recuperação de senha por perguntas de segurança ----
+  // Guardamos a CHAVE da pergunta (ex.: "birthCity"), nao o enunciado: o texto
+  // pode ser reescrito depois sem invalidar a resposta ja cadastrada.
+  securityQuestion1   String?
+  securityQuestion2   String?
+  // Hash bcrypt, nunca texto puro: acertar as duas respostas troca a senha, ou
+  // seja, valem tanto quanto a propria senha.
+  securityAnswer1Hash String?
+  securityAnswer2Hash String?
+  // Trava contra adivinhacao. Sao 4 perguntas conhecidas e respostas curtas;
+  // sem limite, tentar "sao paulo", "rio de janeiro"... seria forca bruta viavel.
+  recoveryAttempts    Int       @default(0)
+  recoveryLockedUntil DateTime?
+
+  // Multi-Tenant: o vinculo com as lojas vive em `Membership`, permitindo que a
+  // mesma conta tenha varios negocios com permissao diferente em cada um.
+  memberships     Membership[]
+
   // Relações
   orders          Order[]
   deliveries      Delivery[]
 
-  @@unique([email, tenantId]) // Email único por tenant
-  @@index([tenantId])
   @@map("users")
+}
+
+// ========== MEMBERSHIP (CONTA <-> NEGOCIO) ==========
+// Vinculo entre uma conta e um negocio. Substitui `User.tenantId`: e o que
+// permite o mesmo dono ter varias lojas e ter permissao diferente em cada uma.
+model Membership {
+  id          String   @id @default(cuid())
+  // "owner" = dono, acesso total e implicito (ignora `permissions`).
+  // "staff"  = funcionario, so o que estiver marcado em `permissions`.
+  role        String   @default("staff")
+  // Chaves do catalogo em src/lib/permissions.ts (ex.: "pdv:use").
+  // Sempre vazio para owner — dono nao depende de lista.
+  permissions String[] @default([])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  userId   String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Uma conta tem no maximo um vinculo por negocio.
+  @@unique([userId, tenantId])
+  @@index([tenantId])
+  @@map("memberships")
 }
 
 // ========== CUSTOMER MODEL ==========
@@ -77,6 +140,11 @@ model Customer {
   email           String?
   phone           String
   address         String?
+  // Bairro: cruzado com `Tenant.deliveryZones` para achar a taxa de entrega.
+  // `POST /api/orders` ja aceitava `newCustomer.neighborhood`, mas nao havia
+  // coluna — o bairro era silenciosamente descartado, e o cliente recorrente
+  // precisava reinformar o bairro (e a taxa) em cada pedido.
+  neighborhood    String?
   city            String?
   state           String?
   zipCode         String?
@@ -107,10 +175,20 @@ model Product {
   price           Decimal  @db.Decimal(10, 2)     // Preço de venda
   costPrice       Decimal  @db.Decimal(10, 2) @default(0) // CMV calculado
   laborCost       Decimal  @db.Decimal(10, 2) @default(0) // Mão de obra fixa por unidade
-  category        String?
+  category        String?                        // legado: categoria como texto livre
   productType     String   @default("simple")     // simple | combo
   active          Boolean  @default(true)
   stock           Int      @default(0)
+
+  // ---- Cardápio e scanner (requisitos 3 e 4) ----
+  // Código de barras/EAN lido pela câmera do celular.
+  barcode         String?
+  // Imagem do produto exibida no cardápio e no PDV.
+  imageUrl        String?
+  // Ordem de exibição dentro da categoria.
+  sortOrder       Int      @default(0)
+  // Marca o produto como destaque no cardápio.
+  featured        Boolean  @default(false)
   // Regra de combo: opções visuais que o cliente vê (ex: 3 proteínas)
   // Formato: [{ group: "proteina", label: "Frango", ingredientId: "xxx" }, ...]
   comboOptions    Json?
@@ -123,14 +201,82 @@ model Product {
   tenantId        String
   tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  // Categoria estruturada do cardápio
+  menuCategoryId  String?
+  menuCategory    MenuCategory?       @relation(fields: [menuCategoryId], references: [id], onDelete: SetNull)
+
   // Relações
   orderItems      OrderItem[]
   technicalSheet  ProductIngredient[]
   pricingRules    PricingRule[]
+  addons          ProductAddon[]
 
   @@unique([sku, tenantId])
+  @@unique([barcode, tenantId])
   @@index([tenantId])
+  @@index([menuCategoryId])
+  @@index([barcode])
   @@map("products")
+}
+
+// ========== MENU CATEGORY (CATEGORIAS DO CARDÁPIO) ==========
+// Agrupa os produtos no cardápio e no PDV (ex: Combos, Bebidas, Sobremesas).
+model MenuCategory {
+  id              String   @id @default(cuid())
+  name            String
+  slug            String
+  description     String?
+  imageUrl        String?
+  sortOrder       Int      @default(0)
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Multi-Tenant
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Relações
+  products        Product[]
+
+  @@unique([slug, tenantId])
+  @@index([tenantId])
+  @@map("menu_categories")
+}
+
+// ========== PRODUCT ADDON (ADICIONAIS / OPCIONAIS) ==========
+// Itens cobrados à parte, escolhidos no momento da venda (requisito 3).
+// Ex: "Bacon extra +R$4,00", "Refrigerante 350ml +R$6,00".
+model ProductAddon {
+  id              String   @id @default(cuid())
+  name            String
+  price           Decimal  @db.Decimal(10, 2) @default(0)
+  // Agrupa opções na tela do PDV (ex: "Adicionais", "Bebida").
+  groupName       String   @default("Adicionais")
+  // Se true, o operador é obrigado a escolher uma opção do grupo.
+  required        Boolean  @default(false)
+  // Máximo de unidades deste adicional por item do pedido.
+  maxQuantity     Int      @default(1)
+  // Insumo consumido do estoque quando este adicional é vendido.
+  ingredientId    String?
+  // Quantidade do insumo consumida por unidade do adicional.
+  ingredientQty   Decimal? @db.Decimal(10, 4)
+  sortOrder       Int      @default(0)
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Multi-Tenant
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Relações
+  productId       String
+  product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([productId])
+  @@map("product_addons")
 }
 
 // ========== PRODUCT INGREDIENT (Ficha Técnica) ==========
@@ -168,8 +314,20 @@ model Order {
   orderNumber     String
   status          String   @default("pending") // pending, confirmed, preparing, ready, dispatched, delivered, cancelled
   orderType       String   @default("delivery") // delivery | balcao | mesa
+
+  // ---- Composição do valor (requisito 1) ----
+  // Soma dos itens + adicionais, antes de taxa e desconto.
+  subtotal        Decimal  @db.Decimal(10, 2) @default(0)
+  // Taxa de entrega cobrada do cliente.
+  deliveryFee     Decimal  @db.Decimal(10, 2) @default(0)
+  // subtotal + deliveryFee - discount
   totalAmount     Decimal  @db.Decimal(10, 2)
   discount        Decimal  @db.Decimal(10, 2) @default(0)
+  // Valor em dinheiro que o cliente vai entregar, para calcular o troco.
+  changeFor       Decimal? @db.Decimal(10, 2)
+  // Troco devido = changeFor - totalAmount (calculado e persistido na venda).
+  changeAmount    Decimal? @db.Decimal(10, 2)
+
   paymentMethod   String   @default("cash")    // cash | credit | debit | pix | voucher
   paymentStatus   String   @default("pending") // pending | paid
   observations    String?
@@ -218,6 +376,12 @@ model OrderItem {
   selectedProteinId   String?                       // ingredientId da proteína escolhida no combo
   selectedProteinName String?                       // nome para denormalizar na impressão
 
+  // Adicionais escolhidos, congelados no momento da venda para o histórico:
+  // [{ "addonId": "...", "name": "Bacon extra", "price": 4.00, "quantity": 1 }]
+  addons              Json?
+  // Soma dos adicionais deste item (já multiplicada pela quantidade).
+  addonsTotal         Decimal  @db.Decimal(10, 2) @default(0)
+
   // Relações
   orderId         String
   order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -261,11 +425,14 @@ model Ingredient {
   name            String
   description     String?
   sku             String
+  // Código de barras/EAN da embalagem, lido pela câmera do celular (requisito 4).
+  barcode         String?
   unit            String   // kg, l, un, g, ml, etc
   price           Decimal  @db.Decimal(10, 2) // Preço unitário
   breakageFactor  Decimal  @db.Decimal(5, 2) @default(0.00) // % de perda/quebra
-  stock           Int      @default(0)
-  minimumStock    Int      @default(0)
+  // Estoque em unidades fracionadas (kg/l exigem decimal, não inteiro).
+  stock           Decimal  @db.Decimal(12, 4) @default(0)
+  minimumStock    Decimal  @db.Decimal(12, 4) @default(0)
   active          Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -279,7 +446,9 @@ model Ingredient {
   invoiceItems       InvoiceItem[]
 
   @@unique([sku, tenantId])
+  @@unique([barcode, tenantId])
   @@index([tenantId])
+  @@index([barcode])
   @@map("ingredients")
 }
 

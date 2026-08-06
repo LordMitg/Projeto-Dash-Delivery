@@ -12,8 +12,24 @@ import {
   ResponsiveContainer
 } from 'recharts';
 import { useTenant } from '../context/TenantContext';
-import { PageHeader, Card, CardGrid } from './Layout';
-import axios from 'axios';
+import { PageHeader, Card } from './Layout';
+import { apiGet, errorMessage } from '../lib/api';
+
+/**
+ * Cores dos graficos vindas dos tokens do tema, nao de hex solto.
+ *
+ * O Recharts renderiza SVG, e `fill`/`stroke` de SVG aceitam `var(--x)` — logo
+ * dava para apontar direto para os tokens. Antes o arquivo usava #3b82f6 e
+ * #10b981, azul e verde que nao existem na paleta: o dashboard ficava com duas
+ * cores a mais que o resto do sistema.
+ */
+const CHART = {
+  revenue: 'var(--color-brand)',
+  costs: 'var(--color-bad)',
+  profit: 'var(--color-good)',
+  grid: 'var(--color-line)',
+  axis: 'var(--color-slate)',
+} as const;
 
 interface MonthlyData {
   month: string;
@@ -28,85 +44,107 @@ interface CustomerGrowthData {
   sales: number;
 }
 
+/** Resposta de `GET /api/financial/dre`. */
+interface DreResponse {
+  revenue: number;
+  cogs: number;
+  expenses: number;
+  netIncome: number;
+  orderCount: number;
+  activeCustomers: number;
+}
+
 export const DashboardCharts: React.FC = () => {
   const { activeTenant } = useTenant();
   const [monthlyData, setMonthlyData] = useState<MonthlyData[]>([]);
   const [growthData, setGrowthData] = useState<CustomerGrowthData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+
     const fetchChartData = async () => {
       if (!activeTenant) return;
+      setLoading(true);
+      setError(null);
+
+      /**
+       * A versao anterior fazia 24 requisicoes EM SERIE dentro de um `for`
+       * (12x DRE + 12x KPIs), levando dezenas de segundos para pintar a tela.
+       * Pior: a chamada de KPIs era `?period=month`, sem o mes — identica nas 12
+       * voltas do laco. O grafico de crescimento mostrava a mesma medicao doze
+       * vezes, desenhando uma linha reta que parecia estagnacao do negocio.
+       *
+       * Agora os 12 meses vao em paralelo e a serie de crescimento e derivada
+       * do proprio DRE mensal, que ja vem com contagem de pedidos e clientes.
+       */
+      const months = Array.from({ length: 12 }, (_, i) => {
+        const date = new Date();
+        date.setDate(1); // evita o "pulo de mes" em dia 31
+        date.setMonth(date.getMonth() - i);
+        return date;
+      }).reverse();
+
       try {
-        setLoading(true);
-
-        // Buscar dados dos últimos 12 meses
-        const token = localStorage.getItem('token');
-        const months = Array.from({ length: 12 }, (_, i) => {
-          const date = new Date();
-          date.setMonth(date.getMonth() - i);
-          return date;
-        }).reverse();
-
-        // Montar dados de receita vs custos
-        const monthlyDataTemp: MonthlyData[] = [];
-        const growthDataTemp: CustomerGrowthData[] = [];
-
-        for (const month of months) {
-          const monthNum = month.getMonth() + 1;
-          const year = month.getFullYear();
-          const monthLabel = month.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
-
-          try {
-            // Buscar DRE do mês
-            const dreResponse = await axios.get(
-              `/api/financial/dre?month=${monthNum}&year=${year}`,
-              { headers: { Authorization: `Bearer ${token}` } }
-            );
-
-            const dre = dreResponse.data;
-            monthlyDataTemp.push({
-              month: monthLabel,
-              revenue: Math.round(dre.revenue || 0),
-              costs: Math.round((dre.cogs || 0) + (dre.expenses || 0)),
-              profit: Math.round(dre.netIncome || 0)
+        const results = await Promise.all(
+          months.map(async (month) => {
+            const monthLabel = month.toLocaleDateString('pt-BR', {
+              month: 'short',
+              year: '2-digit',
             });
-
-            // Buscar KPIs para crescimento
-            const kpisResponse = await axios.get(
-              `/api/financial/kpis?period=month`,
-              { headers: { Authorization: `Bearer ${token}` } }
-            );
-
-            const kpis = kpisResponse.data;
-            growthDataTemp.push({
-              month: monthLabel,
-              customers: kpis.activeCustomers || 0,
-              sales: kpis.totalOrders || 0
+            const dre = await apiGet<DreResponse>('/api/financial/dre', {
+              month: month.getMonth() + 1,
+              year: month.getFullYear(),
             });
-          } catch (err) {
-            console.error(`[v0] Erro ao buscar dados do mês ${monthLabel}:`, err);
-          }
-        }
+            return { monthLabel, dre };
+          })
+        );
 
-        setMonthlyData(monthlyDataTemp);
-        setGrowthData(growthDataTemp);
-      } catch (error) {
-        console.error('[v0] Erro ao buscar dados de gráficos:', error);
+        if (cancelled) return;
+
+        setMonthlyData(
+          results.map(({ monthLabel, dre }) => ({
+            month: monthLabel,
+            revenue: Math.round(dre.revenue || 0),
+            costs: Math.round((dre.cogs || 0) + (dre.expenses || 0)),
+            profit: Math.round(dre.netIncome || 0),
+          }))
+        );
+        setGrowthData(
+          results.map(({ monthLabel, dre }) => ({
+            month: monthLabel,
+            customers: dre.activeCustomers || 0,
+            sales: dre.orderCount || 0,
+          }))
+        );
+      } catch (err) {
+        if (!cancelled) setError(errorMessage(err, 'Erro ao carregar os gráficos.'));
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
-    fetchChartData();
+    void fetchChartData();
+    return () => {
+      cancelled = true;
+    };
   }, [activeTenant]);
 
   if (!activeTenant) {
-    return <div className="card" style={{ margin: '20px' }}>Selecione uma empresa</div>;
+    return <div className="card p-md">Carregando os dados da loja...</div>;
   }
 
   if (loading) {
-    return <div className="card" style={{ margin: '20px', textAlign: 'center' }}>Carregando gráficos...</div>;
+    return <div className="card p-md">Carregando gráficos...</div>;
+  }
+
+  if (error) {
+    return (
+      <div className="card p-md" role="alert">
+        <p className="text-danger">{error}</p>
+      </div>
+    );
   }
 
   return (
@@ -121,23 +159,30 @@ export const DashboardCharts: React.FC = () => {
         <Card title="Faturamento vs Custos Mensais" subtitle="Receita bruta comparada com despesas operacionais">
           <ResponsiveContainer width="100%" height={350}>
             <BarChart data={monthlyData} margin={{ top: 20, right: 30, left: 0, bottom: 60 }}>
-              <CartesianGrid strokeDasharray="3 3" />
+              <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
               <XAxis
                 dataKey="month"
                 angle={-45}
                 textAnchor="end"
                 height={80}
-                tick={{ fontSize: 12 }}
+                tick={{ fontSize: 12, fill: CHART.axis }}
+                stroke={CHART.grid}
               />
-              <YAxis label={{ value: 'R$', angle: -90, position: 'insideLeft' }} />
+              <YAxis
+                label={{ value: 'R$', angle: -90, position: 'insideLeft', fill: CHART.axis }}
+                tick={{ fontSize: 12, fill: CHART.axis }}
+                stroke={CHART.grid}
+              />
               <Tooltip
-                formatter={(value) => `R$ ${value.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`}
+                formatter={(value) =>
+                  `R$ ${Number(value ?? 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`
+                }
                 labelFormatter={(label) => `${label}`}
               />
               <Legend />
-              <Bar dataKey="revenue" fill="#3b82f6" name="Receita" radius={[8, 8, 0, 0]} />
-              <Bar dataKey="costs" fill="#ef4444" name="Custos" radius={[8, 8, 0, 0]} />
-              <Bar dataKey="profit" fill="#10b981" name="Lucro" radius={[8, 8, 0, 0]} />
+              <Bar dataKey="revenue" fill={CHART.revenue} name="Receita" radius={[8, 8, 0, 0]} />
+              <Bar dataKey="costs" fill={CHART.costs} name="Custos" radius={[8, 8, 0, 0]} />
+              <Bar dataKey="profit" fill={CHART.profit} name="Lucro" radius={[8, 8, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </Card>
@@ -150,16 +195,28 @@ export const DashboardCharts: React.FC = () => {
         >
           <ResponsiveContainer width="100%" height={350}>
             <LineChart data={growthData} margin={{ top: 20, right: 30, left: 0, bottom: 60 }}>
-              <CartesianGrid strokeDasharray="3 3" />
+              <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
               <XAxis
                 dataKey="month"
                 angle={-45}
                 textAnchor="end"
                 height={80}
-                tick={{ fontSize: 12 }}
+                tick={{ fontSize: 12, fill: CHART.axis }}
+                stroke={CHART.grid}
               />
-              <YAxis yAxisId="left" label={{ value: 'Clientes', angle: -90, position: 'insideLeft' }} />
-              <YAxis yAxisId="right" orientation="right" label={{ value: 'Vendas', angle: 90, position: 'insideRight' }} />
+              <YAxis
+                yAxisId="left"
+                label={{ value: 'Clientes', angle: -90, position: 'insideLeft', fill: CHART.axis }}
+                tick={{ fontSize: 12, fill: CHART.axis }}
+                stroke={CHART.grid}
+              />
+              <YAxis
+                yAxisId="right"
+                orientation="right"
+                label={{ value: 'Vendas', angle: 90, position: 'insideRight', fill: CHART.axis }}
+                tick={{ fontSize: 12, fill: CHART.axis }}
+                stroke={CHART.grid}
+              />
               <Tooltip
                 formatter={(value) => String(value)}
                 labelFormatter={(label) => `${label}`}
@@ -169,19 +226,19 @@ export const DashboardCharts: React.FC = () => {
                 yAxisId="left"
                 type="monotone"
                 dataKey="customers"
-                stroke="#3b82f6"
+                stroke={CHART.revenue}
                 name="Clientes Ativos"
                 strokeWidth={2}
-                dot={{ fill: '#3b82f6', r: 4 }}
+                dot={{ fill: CHART.revenue, r: 4 }}
               />
               <Line
                 yAxisId="right"
                 type="monotone"
                 dataKey="sales"
-                stroke="#10b981"
+                stroke={CHART.profit}
                 name="Pedidos"
                 strokeWidth={2}
-                dot={{ fill: '#10b981', r: 4 }}
+                dot={{ fill: CHART.profit, r: 4 }}
               />
             </LineChart>
           </ResponsiveContainer>

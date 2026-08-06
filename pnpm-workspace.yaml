@@ -1,0 +1,13 @@
+packages:
+  - "backend"
+  - "frontend"
+
+# Dependencias autorizadas a rodar scripts de instalacao.
+# O Prisma precisa disso para baixar o engine de query; sem essa permissao
+# o `prisma generate` falha com "Query engine binary not found".
+onlyBuiltDependencies:
+  - "@prisma/client"
+  - "@prisma/engines"
+  - "prisma"
+  - "esbuild"
+  - "@embedded-postgres/linux-x64"

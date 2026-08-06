@@ -1,6 +1,6 @@
-import { PrismaClient, Prisma } from '@prisma/client';
+import { prisma } from '../lib/prisma.js'
+import { Prisma } from '@prisma/client';
 
-const prisma = new PrismaClient();
 
 // Estrutura de um item da ficha técnica para cálculo
 export interface TechSheetLine {

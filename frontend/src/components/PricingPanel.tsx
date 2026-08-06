@@ -169,10 +169,13 @@ export default function PricingPanel() {
   }
 
   // ---- Grupos de linhas por produto ----
-  const productMap: Record<string, PricingRule[]> = {}
+  // `Map` em vez de objeto indexado: o `get` devolve um tipo honesto e some a
+  // necessidade de reafirmar ao TypeScript que a chave existe.
+  const productMap = new Map<string, PricingRule[]>()
   for (const r of rules) {
-    if (!productMap[r.product.id]) productMap[r.product.id] = []
-    productMap[r.product.id].push(r)
+    const bucket = productMap.get(r.product.id)
+    if (bucket) bucket.push(r)
+    else productMap.set(r.product.id, [r])
   }
 
   const marginColor = (m: number) => {
@@ -229,8 +232,9 @@ export default function PricingPanel() {
             </button>
           </div>
 
-          {Object.values(productMap).map(productRules => {
-            const product = productRules[0].product
+          {[...productMap.values()].map(productRules => {
+            const product = productRules[0]?.product
+            if (!product) return null
             return (
               <div key={product.id} style={styles.productBlock}>
                 <div style={styles.productHeader}>

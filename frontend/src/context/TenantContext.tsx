@@ -1,86 +1,46 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import type { ReactNode } from 'react'
+import { useAuth, type AuthTenant, type TenantSummary } from './AuthContext'
 
-interface Tenant {
-  id: string;
-  name: string;
-  slug: string;
-  email: string;
-  phone?: string;
-  active: boolean;
+/**
+ * Camada de compatibilidade sobre o AuthContext.
+ *
+ * Historico: a primeira versao buscava `GET /api/tenants` para montar um seletor
+ * de empresa, mas cada conta pertencia a exatamente uma loja — o seletor nao
+ * tinha o que trocar e `switchTenant` era um stub vazio.
+ *
+ * Agora uma conta pode ter vários negócios, e a troca existe de verdade: ela vai
+ * ao servidor, que confirma o vínculo e devolve um token novo. O cliente nunca
+ * decide sozinho em que loja está — se decidisse, seria falha de isolamento.
+ *
+ * Oito componentes ainda chamam `useTenant()`, então o formato de retorno é
+ * preservado e a loja continua vindo de uma única fonte de verdade.
+ */
+interface TenantCompat {
+  activeTenant: AuthTenant | null
+  /** Alias: alguns componentes usam este nome. */
+  currentTenant: AuthTenant | null
+  /** Todos os negócios da conta. */
+  tenants: TenantSummary[]
+  loading: boolean
+  /** `true` enquanto o servidor reemite o token da nova loja. */
+  switching: boolean
+  /** Troca o negócio ativo. Assíncrono: depende do servidor. */
+  switchTenant: (tenantId: string) => Promise<void>
 }
 
-interface TenantContextType {
-  activeTenant: Tenant | null;
-  tenants: Tenant[];
-  switchTenant: (tenantId: string) => void;
-  loading: boolean;
-}
-
-const TenantContext = createContext<TenantContextType | undefined>(undefined);
-
-export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [activeTenant, setActiveTenant] = useState<Tenant | null>(null);
-  const [tenants, setTenants] = useState<Tenant[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  // Carregar tenants do usuário
-  useEffect(() => {
-    const loadTenants = async () => {
-      try {
-        // Simular carregamento (será integrado com API)
-        const token = localStorage.getItem('token');
-        if (!token) {
-          setLoading(false);
-          return;
-        }
-
-        const response = await fetch('http://localhost:3001/api/tenants', {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          setTenants(data.tenants);
-          
-          // Restaurar tenant ativo da sessão
-          const lastTenantId = localStorage.getItem('activeTenantId');
-          const activeT = lastTenantId 
-            ? data.tenants.find((t: Tenant) => t.id === lastTenantId)
-            : data.tenants[0];
-          
-          setActiveTenant(activeT);
-        }
-      } catch (error) {
-        console.error('Erro ao carregar tenants:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadTenants();
-  }, []);
-
-  const switchTenant = (tenantId: string) => {
-    const selected = tenants.find(t => t.id === tenantId);
-    if (selected) {
-      setActiveTenant(selected);
-      localStorage.setItem('activeTenantId', tenantId);
-    }
-  };
-
-  return (
-    <TenantContext.Provider value={{ activeTenant, tenants, switchTenant, loading }}>
-      {children}
-    </TenantContext.Provider>
-  );
-};
-
-export const useTenant = () => {
-  const context = useContext(TenantContext);
-  if (!context) {
-    throw new Error('useTenant deve ser usado dentro de TenantProvider');
+export function useTenant(): TenantCompat {
+  const { tenant, tenants, loading, switching, switchTenant } = useAuth()
+  return {
+    activeTenant: tenant,
+    currentTenant: tenant,
+    tenants,
+    loading,
+    switching,
+    switchTenant,
   }
-  return context;
-};
+}
+
+/** Mantido para não quebrar importações antigas; o AuthProvider já envolve tudo. */
+export function TenantProvider({ children }: { children: ReactNode }) {
+  return <>{children}</>
+}

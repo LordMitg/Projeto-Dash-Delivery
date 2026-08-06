@@ -1,6 +1,5 @@
-import { PrismaClient, Fleet } from '@prisma/client'
-
-const prisma = new PrismaClient()
+import { Prisma, type Fleet } from '@prisma/client'
+import { prisma } from '../lib/prisma.js'
 
 // ---------------------------------------------------------------------------
 // TIPOS
@@ -161,7 +160,7 @@ export async function generateDeliveryQuote(
       tenantId,
       distanceKm,
       ownFleetCost:      cheapestFleet ? cheapestFleet.breakdown.total : 0,
-      ownFleetBreakdown: cheapestFleet ? cheapestFleet.breakdown : {},
+      ownFleetBreakdown: (cheapestFleet ? { ...cheapestFleet.breakdown } : {}) as Prisma.InputJsonObject,
       appDeliveryCost:   appCost.estimatedCost,
       recommendation,
       estimatedSaving,
@@ -170,7 +169,7 @@ export async function generateDeliveryQuote(
     update: {
       distanceKm,
       ownFleetCost:      cheapestFleet ? cheapestFleet.breakdown.total : 0,
-      ownFleetBreakdown: cheapestFleet ? cheapestFleet.breakdown : {},
+      ownFleetBreakdown: (cheapestFleet ? { ...cheapestFleet.breakdown } : {}) as Prisma.InputJsonObject,
       appDeliveryCost:   appCost.estimatedCost,
       recommendation,
       estimatedSaving,

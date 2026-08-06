@@ -1,18 +1,15 @@
 import { Router, Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma.js';
 
 const router = Router();
-const prisma = new PrismaClient();
 
 // GET /api/financial/kpis?period=month
 router.get('/kpis', async (req: Request, res: Response) => {
   try {
-    const tenantId = (req as any).tenant?.id;
+    // Antes lia `req.tenant?.id`, que o middleware ativo nao preenchia,
+    // fazendo esta rota responder 401 mesmo com token valido.
+    const tenantId = req.auth!.tenantId;
     const period = req.query.period as string || 'month';
-
-    if (!tenantId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
 
     // Calcular datas baseado no período
     const today = new Date();
@@ -148,20 +145,18 @@ router.get('/kpis', async (req: Request, res: Response) => {
 // GET /api/financial/dre?month=&year=
 router.get('/dre', async (req: Request, res: Response) => {
   try {
-    const tenantId = (req as any).tenant?.id;
+    const tenantId = req.auth!.tenantId;
     const month = parseInt(req.query.month as string) || new Date().getMonth() + 1;
     const year = parseInt(req.query.year as string) || new Date().getFullYear();
-
-    if (!tenantId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
 
     const startDate = new Date(year, month - 1, 1);
     const endDate = new Date(year, month, 0, 23, 59, 59);
 
-    // Receita
+    // Receita. Selecionamos apenas as colunas usadas: antes o `findMany` trazia
+    // a linha inteira de cada pedido do mes para somar dois campos.
     const orders = await prisma.order.findMany({
-      where: { tenantId, paymentStatus: 'paid', createdAt: { gte: startDate, lte: endDate } }
+      where: { tenantId, paymentStatus: 'paid', createdAt: { gte: startDate, lte: endDate } },
+      select: { totalAmount: true, discount: true, customerId: true }
     });
 
     const revenue = orders.reduce((sum, o) => sum + Number(o.totalAmount), 0);
@@ -184,6 +179,14 @@ router.get('/dre', async (req: Request, res: Response) => {
 
     const totalExpenses = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
 
+    // Estes dois campos saem dos pedidos que ja carregamos. Sem eles, o grafico
+    // de crescimento do painel chamava /kpis doze vezes seguidas — e sempre sem
+    // filtro de mes, recebendo o mesmo numero nas doze voltas do laco.
+    const orderCount = orders.length;
+    const activeCustomers = new Set(
+      orders.map((o) => o.customerId).filter((id): id is string => Boolean(id))
+    ).size;
+
     res.json({
       month,
       year,
@@ -195,6 +198,8 @@ router.get('/dre', async (req: Request, res: Response) => {
       expenses: totalExpenses,
       ebitda: revenue - cogs - totalExpenses,
       netIncome: revenue - cogs - totalExpenses,
+      orderCount,
+      activeCustomers,
     });
   } catch (error) {
     console.error('[Backend] Erro ao buscar DRE:', error);

@@ -1,17 +1,17 @@
+import { prisma } from '../lib/prisma.js'
 import { Router, Request, Response } from 'express'
-import { PrismaClient } from '@prisma/client'
+
 import {
   calcMarkupReverse,
   generatePricingTableForProduct,
   recalculateAllPricing,
-} from '../services/pricingService'
+} from '../services/pricingService.js'
 import {
   generateDeliveryQuote,
   confirmDeliveryChoice,
-} from '../services/logisticsService'
+} from '../services/logisticsService.js'
 
 const router = Router()
-const prisma = new PrismaClient()
 
 // ---------------------------------------------------------------------------
 // CANAIS DE VENDA
@@ -143,7 +143,7 @@ router.post('/preview', async (req: Request, res: Response) => {
 router.post('/generate/:productId', async (req: Request, res: Response) => {
   try {
     const { tenantId } = req as any
-    const { productId } = req.params
+    const productId = String(req.params.productId ?? '')
 
     const results = await generatePricingTableForProduct(productId, tenantId)
     res.json({ data: results, count: results.length })

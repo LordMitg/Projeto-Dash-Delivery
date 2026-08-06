@@ -1,127 +1,158 @@
-import express, { Request, Response, NextFunction } from 'express';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import { PrismaClient } from '@prisma/client';
+/**
+ * Bootstrap do servidor.
+ *
+ * Mudancas em relacao a versao anterior:
+ *  - Um unico middleware de autenticacao (antes eram dois, com segredos de
+ *    fallback diferentes, e cada rota lia um campo que o outro nao preenchia).
+ *  - Uma unica instancia de PrismaClient (antes cada arquivo de rota criava a
+ *    sua, abrindo um pool de conexoes por arquivo).
+ *  - Error handler registrado DEPOIS das rotas e antes do 404, tratando
+ *    AppError e erros do Zod/Prisma de forma consistente.
+ *  - CORS lendo as origens da configuracao, em vez de hardcode de localhost.
+ */
+import express, { type Request, type Response } from 'express'
+import cors from 'cors'
 
-// Importar rotas
-import authRoutes from './routes/authRoutes';
-import ingredientRoutes from './routes/ingredientRoutes';
-import productRoutes from './routes/productRoutes';
-import orderRoutes from './routes/orderRoutes';
-import financialRoutes from './routes/financialRoutes';
-import invoiceRoutes from './routes/invoiceRoutes';
-import pricingRoutes from './routes/pricingRoutes';
+import { env } from './config/env.js'
+import { prisma } from './lib/prisma.js'
+import { errorHandler, notFoundHandler } from './lib/http.js'
+import {
+  authenticate,
+  requireFinancialAccess,
+  requirePermission,
+  verifyToken,
+} from './middleware/auth.js'
+import { authLimiter } from './middleware/rateLimit.js'
+import { setRealtimeServer, tenantRoom } from './lib/realtime.js'
+import { Server as SocketIOServer } from 'socket.io'
 
-// Importar middlewares
-import { tenantMiddleware } from './middleware/tenant';
-import { authenticate, requireFinancialAccess } from './middleware/authMiddleware';
+// Rotas
+import authRoutes from './routes/authRoutes.js'
+import ingredientRoutes from './routes/ingredientRoutes.js'
+import productRoutes from './routes/productRoutes.js'
+import menuRoutes from './routes/menuRoutes.js'
+import orderRoutes from './routes/orderRoutes.js'
+import customerRoutes from './routes/customerRoutes.js'
+import financialRoutes from './routes/financialRoutes.js'
+import invoiceRoutes from './routes/invoiceRoutes.js'
+import pricingRoutes from './routes/pricingRoutes.js'
+import storeRoutes from './routes/storeRoutes.js'
+import publicRoutes from './routes/publicRoutes.js'
+import tenantRoutes from './routes/tenantRoutes.js'
+import userRoutes from './routes/userRoutes.js'
 
-// Carregar variáveis de ambiente
-dotenv.config();
+const app = express()
 
-const app = express();
-const prisma = new PrismaClient();
+app.set('trust proxy', 1)
 
-const PORT = process.env.PORT || 3001;
+app.use(
+  cors({
+    origin: env.corsOrigins,
+    credentials: true,
+  }),
+)
+app.use(express.json({ limit: '5mb' }))
+app.use(express.urlencoded({ extended: true }))
 
-// Middlewares globais
-app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173'],
-  credentials: true
-}));
-app.use(express.json());
+// Cabecalhos de seguranca basicos (defense-in-depth).
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN')
+  next()
+})
 
-// Health check (sem autenticação)
-app.get('/health', (req: Request, res: Response) => {
-  res.json({ 
-    status: 'OK', 
+// ---------- Rotas publicas ----------
+
+app.get('/health', async (_req: Request, res: Response) => {
+  let database = 'ok'
+  try {
+    await prisma.$queryRaw`SELECT 1`
+  } catch {
+    database = 'unreachable'
+  }
+
+  res.json({
+    status: database === 'ok' ? 'ok' : 'degraded',
+    database,
     timestamp: new Date().toISOString(),
-    version: '7.0.0'
-  });
-});
+  })
+})
 
-// ========== ROTAS DE AUTENTICAÇÃO (SEM PROTEÇÃO) ==========
-app.use('/api/auth', authRoutes);
+// `express-rate-limit` estava instalado no projeto mas nunca aplicado: login,
+// cadastro e recuperacao ficavam abertos a forca bruta. As rotas de auth sao as
+// unicas nao autenticadas que aceitam POST, entao sao o alvo natural.
+app.use('/api/auth', authLimiter, authRoutes)
 
-// ========== ROTAS PROTEGIDAS COM AUTENTICAÇÃO ==========
-// Middleware de autenticação obrigatório a partir daqui
-app.use('/api/', authenticate);
+// Cardapio publico e acompanhamento de pedido: sem login, escopado por slug.
+app.use('/api/public', publicRoutes)
 
-// Rotas de Ingredientes
-app.use('/api/ingredients', ingredientRoutes);
+// ---------- Rotas protegidas ----------
 
-// Rotas de Produtos
-app.use('/api/products', productRoutes);
+// Negocios da conta e equipe. Ambas montam o proprio `authenticate` internamente
+// (tenantRoutes) ou exigem owner (userRoutes).
+app.use('/api/tenants', tenantRoutes)
+app.use('/api/users', userRoutes)
 
-// Rotas de Pedidos
-app.use('/api/orders', orderRoutes);
+// Cada area exige a permissao correspondente do catalogo. O guard no menu do
+// frontend apenas esconde o item; e aqui que o acesso e efetivamente negado —
+// sem isto, um funcionario poderia chamar a API direto pela URL.
+// A permissao de LEITURA e exigida no mount; a de escrita fica dentro de cada
+// rota, no verbo que altera dados.
+app.use('/api/ingredients', authenticate, requirePermission('ingredients:view'), ingredientRoutes)
+app.use('/api/products', authenticate, requirePermission('products:view'), productRoutes)
+app.use('/api/menu', authenticate, requirePermission('products:view'), menuRoutes)
+app.use('/api/orders', authenticate, requirePermission('orders:view', 'pdv:use'), orderRoutes)
+// O PDV chamava esta rota desde sempre, mas ela nao existia: 404 em toda busca
+// por telefone, e todo cliente recorrente era cadastrado de novo.
+app.use('/api/customers', authenticate, requirePermission('customers:view'), customerRoutes)
+app.use('/api/invoices', authenticate, requirePermission('invoices:manage'), invoiceRoutes)
+app.use('/api/pricing', authenticate, requirePermission('pricing:view'), pricingRoutes)
+// `/api/store` serve tanto leitura (o PDV le taxas e horario) quanto escrita
+// (Ajustes), entao aqui exige apenas login: cada rota interna aplica o seu guard.
+app.use('/api/store', authenticate, storeRoutes)
+app.use('/api/financial', authenticate, requireFinancialAccess, financialRoutes)
 
-// Rotas de Notas Fiscais
-app.use('/api/invoices', invoiceRoutes);
+// ---------- Tratamento de erros ----------
+// A ordem importa: 404 para rota inexistente, depois o error handler.
+app.use(notFoundHandler)
+app.use(errorHandler)
 
-// Rotas de Precificação
-app.use('/api/pricing', pricingRoutes);
+const server = app.listen(env.PORT, () => {
+  console.log(`[backend] ouvindo em http://localhost:${env.PORT} (${env.NODE_ENV})`)
+})
 
-// Rotas Financeiras (com acesso restrito)
-app.use('/api/financial', requireFinancialAccess, financialRoutes);
+// ---------- Tempo real (KDS e acompanhamento do pedido) ----------
+const io = new SocketIOServer(server, {
+  cors: { origin: env.corsOrigins, credentials: true },
+})
 
-// ========== ERROR HANDLING ==========
-app.use((err: any, req: Request, res: Response, next: NextFunction) => {
-  console.error('[Backend Error]', err);
-  
-  if (err.name === 'JsonWebTokenError') {
-    return res.status(401).json({ error: 'Token inválido' });
+// Cada socket precisa provar quem e antes de entrar na sala da loja,
+// senao um cliente poderia escutar os pedidos de outro restaurante.
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token as string | undefined
+  if (!token) return next(new Error('Token nao fornecido'))
+  try {
+    const auth = verifyToken(token)
+    socket.data.auth = auth
+    void socket.join(tenantRoom(auth.tenantId))
+    next()
+  } catch {
+    next(new Error('Token invalido'))
   }
-  
-  if (err.name === 'TokenExpiredError') {
-    return res.status(401).json({ error: 'Token expirado' });
-  }
-  
-  res.status(500).json({ 
-    error: 'Erro interno do servidor',
-    message: process.env.NODE_ENV === 'development' ? err.message : undefined
-  });
-});
+})
 
-// 404 handler
-app.use((req: Request, res: Response) => {
-  res.status(404).json({ error: 'Rota não encontrada' });
-});
+setRealtimeServer(io)
 
-// ========== INICIAR SERVIDOR ==========
-app.listen(PORT, () => {
-  console.log(`
-╔════════════════════════════════════════════╗
-║   🚀 BACKEND DELIVERY ERP - ETAPA 7       ║
-╚════════════════════════════════════════════╝
+// ---------- Encerramento gracioso ----------
+async function shutdown(signal: string) {
+  console.log(`[backend] recebido ${signal}, encerrando...`)
+  server.close(() => console.log('[backend] servidor HTTP fechado'))
+  await prisma.$disconnect()
+  process.exit(0)
+}
 
-✓ Servidor rodando em: http://localhost:${PORT}
-✓ Autenticação JWT: Ativa
-✓ Multi-tenant: Ativo
-✓ Banco de dados: Conectando...
+process.on('SIGINT', () => void shutdown('SIGINT'))
+process.on('SIGTERM', () => void shutdown('SIGTERM'))
 
-Endpoints disponíveis:
-  • POST   /api/auth/login
-  • POST   /api/auth/register
-  • GET    /api/auth/me (protegido)
-  • GET    /health (sem autenticação)
-  
-Rotas protegidas por JWT:
-  • /api/ingredients/*
-  • /api/products/*
-  • /api/orders/*
-  • /api/invoices/*
-  • /api/pricing/*
-  • /api/financial/* (requer role: admin/manager/caixa)
-
-Modo: ${process.env.NODE_ENV || 'development'}
-Versão: 7.0.0
-  `);
-});
-
-// Graceful shutdown
-process.on('SIGINT', async () => {
-  console.log('\nEncerrando servidor...');
-  await prisma.$disconnect();
-  process.exit(0);
-});
+export { app }

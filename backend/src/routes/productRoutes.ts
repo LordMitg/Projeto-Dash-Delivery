@@ -1,13 +1,13 @@
 import { Router, Request, Response } from 'express';
-import { PrismaClient, Prisma } from '@prisma/client';
-import { CMVService, TechSheetLine } from '../services/cmvService';
+import { Prisma } from '@prisma/client';
+import { prisma } from '../lib/prisma.js';
+import { CMVService, TechSheetLine } from '../services/cmvService.js';
 
 const router = Router();
-const prisma = new PrismaClient();
 
 // Helpers de resposta
 const ok = (res: Response, data: unknown) => res.status(200).json({ success: true, data });
-const created = (res: Response, data: unknown) => res.status(201).json({ success: true, data });
+const sendCreated = (res: Response, data: unknown) => res.status(201).json({ success: true, data });
 const badRequest = (res: Response, msg: string) => res.status(400).json({ success: false, error: msg });
 const notFound = (res: Response) => res.status(404).json({ success: false, error: 'Recurso não encontrado.' });
 const serverError = (res: Response, err: unknown) => {
@@ -21,29 +21,81 @@ const serverError = (res: Response, err: unknown) => {
 // ─────────────────────────────────────────────
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const tenantId = (req as any).tenantId as string;
-    const { category, type, active } = req.query;
+    const tenantId = req.auth!.tenantId;
+    const { category, type, active, search, categoryId } = req.query;
 
     const where: Prisma.ProductWhereInput = { tenantId };
     if (category) where.category = String(category);
+    if (categoryId) where.menuCategoryId = String(categoryId);
     if (type) where.productType = String(type);
     if (active !== undefined) where.active = active === 'true';
+
+    // Busca livre por nome, SKU ou codigo de barras (usada pelo PDV).
+    if (search) {
+      const term = String(search).trim();
+      where.OR = [
+        { name: { contains: term, mode: 'insensitive' } },
+        { sku: { contains: term, mode: 'insensitive' } },
+        { barcode: term },
+      ];
+    }
 
     const products = await prisma.product.findMany({
       where,
       include: {
+        menuCategory: { select: { id: true, name: true, slug: true, sortOrder: true } },
+        addons: {
+          where: { active: true },
+          orderBy: [{ groupName: 'asc' }, { sortOrder: 'asc' }],
+        },
         technicalSheet: {
           include: {
             ingredient: {
-              select: { id: true, name: true, unit: true, price: true, breakageFactor: true },
+              select: { id: true, name: true, unit: true, price: true, breakageFactor: true, stock: true },
             },
           },
         },
       },
-      orderBy: { name: 'asc' },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
 
     return ok(res, products);
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// ─────────────────────────────────────────────
+// GET /api/products/barcode/:code
+// Busca produto por codigo de barras — usada pelo scanner do celular.
+// Precisa vir ANTES de `/:id`, senao o Express trata "barcode" como um id.
+// ─────────────────────────────────────────────
+router.get('/barcode/:code', async (req: Request, res: Response) => {
+  try {
+    const tenantId = req.auth!.tenantId;
+    const code = String(req.params.code ?? '').trim();
+
+    const product = await prisma.product.findFirst({
+      where: { tenantId, barcode: code },
+      include: {
+        menuCategory: { select: { id: true, name: true } },
+        addons: { where: { active: true }, orderBy: { sortOrder: 'asc' } },
+      },
+    });
+
+    if (!product) {
+      // `code` e o codigo de ERRO (o frontend usa para decidir a acao);
+      // o codigo de barras lido vai em `barcode`, senao o cliente
+      // interpretaria "7891..." como um tipo de erro.
+      return res.status(404).json({
+        success: false,
+        error: `Nenhum produto cadastrado com o codigo ${code}.`,
+        code: 'BARCODE_NOT_FOUND',
+        barcode: code,
+      });
+    }
+
+    return ok(res, product);
   } catch (err) {
     return serverError(res, err);
   }
@@ -55,8 +107,8 @@ router.get('/', async (req: Request, res: Response) => {
 // ─────────────────────────────────────────────
 router.get('/:id', async (req: Request, res: Response) => {
   try {
-    const tenantId = (req as any).tenantId as string;
-    const { id } = req.params;
+    const tenantId = req.auth!.tenantId;
+    const id = String(req.params.id ?? '');
 
     const product = await prisma.product.findFirst({
       where: { id, tenantId },
@@ -98,7 +150,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 // ─────────────────────────────────────────────
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const tenantId = (req as any).tenantId as string;
+    const tenantId = req.auth!.tenantId;
     const {
       name,
       description,
@@ -110,6 +162,12 @@ router.post('/', async (req: Request, res: Response) => {
       comboOptions,
       packagingIngredientId,
       technicalSheet = [],
+      // Campos do cardapio
+      barcode,
+      imageUrl,
+      menuCategoryId,
+      sortOrder = 0,
+      featured = false,
     } = req.body;
 
     // Validações básicas
@@ -120,6 +178,21 @@ router.post('/', async (req: Request, res: Response) => {
     // Verifica SKU único no tenant
     const existing = await prisma.product.findFirst({ where: { sku, tenantId } });
     if (existing) return badRequest(res, `SKU "${sku}" já existe neste tenant.`);
+
+    // Codigo de barras nao pode repetir dentro da mesma loja, senao o
+    // scanner do celular ficaria ambiguo.
+    const cleanBarcode = barcode?.trim() || null;
+    if (cleanBarcode) {
+      const dupBarcode = await prisma.product.findFirst({
+        where: { barcode: cleanBarcode, tenantId },
+      });
+      if (dupBarcode) {
+        return badRequest(
+          res,
+          `O codigo de barras ${cleanBarcode} ja esta em uso pelo produto "${dupBarcode.name}".`,
+        );
+      }
+    }
 
     // Valida ficha técnica: para combos, exatamente 1 proteína principal
     if (productType === 'combo') {
@@ -138,7 +211,9 @@ router.post('/', async (req: Request, res: Response) => {
     );
 
     const product = await prisma.$transaction(async (tx) => {
-      const created = await tx.product.create({
+      // Nome `newProduct` em vez de `created`: antes esta variavel sombreava
+      // o helper de resposta `created()` definido no topo do arquivo.
+      const newProduct = await tx.product.create({
         data: {
           name: name.trim(),
           description: description?.trim(),
@@ -150,6 +225,11 @@ router.post('/', async (req: Request, res: Response) => {
           productType,
           comboOptions: comboOptions ?? undefined,
           packagingIngredientId: packagingIngredientId ?? null,
+          barcode: cleanBarcode,
+          imageUrl: imageUrl?.trim() || null,
+          menuCategoryId: menuCategoryId || null,
+          sortOrder: Number(sortOrder) || 0,
+          featured: Boolean(featured),
           tenantId,
         },
       });
@@ -157,7 +237,7 @@ router.post('/', async (req: Request, res: Response) => {
       // Persiste ficha técnica
       if (technicalSheet.length > 0) {
         const lineData = cmv.lines.map((line) => ({
-          productId: created.id,
+          productId: newProduct.id,
           ingredientId: line.ingredientId,
           quantity: new Prisma.Decimal(line.quantity),
           unitCost: new Prisma.Decimal(line.unitPrice),
@@ -169,10 +249,10 @@ router.post('/', async (req: Request, res: Response) => {
         await tx.productIngredient.createMany({ data: lineData });
       }
 
-      return created;
+      return newProduct;
     });
 
-    return created(res, { product, cmv });
+    return sendCreated(res, { product, cmv });
   } catch (err) {
     return serverError(res, err);
   }
@@ -184,8 +264,8 @@ router.post('/', async (req: Request, res: Response) => {
 // ─────────────────────────────────────────────
 router.put('/:id', async (req: Request, res: Response) => {
   try {
-    const tenantId = (req as any).tenantId as string;
-    const { id } = req.params;
+    const tenantId = req.auth!.tenantId;
+    const id = String(req.params.id ?? '');
     const {
       name,
       description,
@@ -197,10 +277,29 @@ router.put('/:id', async (req: Request, res: Response) => {
       comboOptions,
       packagingIngredientId,
       technicalSheet,
+      barcode,
+      imageUrl,
+      menuCategoryId,
+      sortOrder,
+      featured,
+      active,
     } = req.body;
 
     const product = await prisma.product.findFirst({ where: { id, tenantId } });
     if (!product) return notFound(res);
+
+    // Codigo de barras precisa continuar unico dentro da loja.
+    if (barcode !== undefined && barcode?.trim()) {
+      const dupBarcode = await prisma.product.findFirst({
+        where: { barcode: barcode.trim(), tenantId, id: { not: id } },
+      });
+      if (dupBarcode) {
+        return badRequest(
+          res,
+          `O codigo de barras ${barcode.trim()} ja esta em uso pelo produto "${dupBarcode.name}".`,
+        );
+      }
+    }
 
     // Monta dados de atualização apenas com campos presentes
     const updateData: Prisma.ProductUpdateInput = {};
@@ -213,6 +312,16 @@ router.put('/:id', async (req: Request, res: Response) => {
     if (productType !== undefined) updateData.productType = productType;
     if (comboOptions !== undefined) updateData.comboOptions = comboOptions;
     if (packagingIngredientId !== undefined) updateData.packagingIngredientId = packagingIngredientId;
+    if (barcode !== undefined) updateData.barcode = barcode?.trim() || null;
+    if (imageUrl !== undefined) updateData.imageUrl = imageUrl?.trim() || null;
+    if (sortOrder !== undefined) updateData.sortOrder = Number(sortOrder) || 0;
+    if (featured !== undefined) updateData.featured = Boolean(featured);
+    if (active !== undefined) updateData.active = Boolean(active);
+    if (menuCategoryId !== undefined) {
+      updateData.menuCategory = menuCategoryId
+        ? { connect: { id: menuCategoryId } }
+        : { disconnect: true };
+    }
 
     await prisma.$transaction(async (tx) => {
       await tx.product.update({ where: { id }, data: updateData });
@@ -265,8 +374,8 @@ router.put('/:id', async (req: Request, res: Response) => {
 // ─────────────────────────────────────────────
 router.post('/:id/recalculate-cmv', async (req: Request, res: Response) => {
   try {
-    const tenantId = (req as any).tenantId as string;
-    const { id } = req.params;
+    const tenantId = req.auth!.tenantId;
+    const id = String(req.params.id ?? '');
 
     const product = await prisma.product.findFirst({ where: { id, tenantId } });
     if (!product) return notFound(res);
@@ -284,7 +393,7 @@ router.post('/:id/recalculate-cmv', async (req: Request, res: Response) => {
 // ─────────────────────────────────────────────
 router.post('/preview-cmv', async (req: Request, res: Response) => {
   try {
-    const tenantId = (req as any).tenantId as string;
+    const tenantId = req.auth!.tenantId;
     const { technicalSheet = [], laborCost = 0, salePrice = 0 } = req.body;
 
     const cmv = await CMVService.calculate(
@@ -324,8 +433,8 @@ router.post('/resolve-combo', async (req: Request, res: Response) => {
 // ─────────────────────────────────────────────
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
-    const tenantId = (req as any).tenantId as string;
-    const { id } = req.params;
+    const tenantId = req.auth!.tenantId;
+    const id = String(req.params.id ?? '');
 
     const product = await prisma.product.findFirst({ where: { id, tenantId } });
     if (!product) return notFound(res);

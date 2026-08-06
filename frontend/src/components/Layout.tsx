@@ -33,12 +33,19 @@ export const PageHeader: React.FC<{
 };
 
 // Grid de Cards
+// `className` e `style` sao repassados porque as telas precisam ajustar o
+// espacamento entre secoes sem envolver o grid num <div> extra.
 export const CardGrid: React.FC<{
   columns?: 2 | 3 | 4;
+  className?: string;
+  style?: React.CSSProperties;
   children: React.ReactNode;
-}> = ({ columns = 3, children }) => {
-  const gridClass = `grid grid-${columns}`;
-  return <div className={gridClass}>{children}</div>;
+}> = ({ columns = 3, className = '', style, children }) => {
+  return (
+    <div className={`grid grid-${columns} ${className}`.trim()} style={style}>
+      {children}
+    </div>
+  );
 };
 
 // Card Genérico
@@ -46,10 +53,12 @@ export const Card: React.FC<{
   title?: string;
   subtitle?: string;
   actions?: React.ReactNode;
+  className?: string;
+  style?: React.CSSProperties;
   children: React.ReactNode;
-}> = ({ title, subtitle, actions, children }) => {
+}> = ({ title, subtitle, actions, className = '', style, children }) => {
   return (
-    <div className="card">
+    <div className={`card ${className}`.trim()} style={style}>
       {(title || actions) && (
         <div className="card-header">
           <div>

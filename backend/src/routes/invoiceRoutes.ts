@@ -1,11 +1,12 @@
 import { Router, Request, Response } from 'express'
 import multer from 'multer'
-import { tenantMiddleware, AuthRequest } from '../middleware/tenant'
+import { tenantMiddleware, AuthRequest } from '../middleware/tenant.js'
+import { prisma } from '../lib/prisma.js'
 import {
   parseInvoiceXml,
   processInvoice,
   getUnmappedItems,
-} from '../services/invoiceService'
+} from '../services/invoiceService.js'
 
 const router = Router()
 
@@ -97,15 +98,18 @@ router.get('/', tenantMiddleware, async (req: AuthRequest, res: Response) => {
     const where: any = { tenantId }
     if (status) where.status = status
 
+    // Antes usava `(req as any).prisma`, que nunca foi definido por nenhum
+    // middleware: esta rota quebrava com "cannot read property invoice of
+    // undefined". Agora usa a instancia compartilhada.
     const [invoices, total] = await Promise.all([
-      (req as any).prisma.invoice.findMany({
+      prisma.invoice.findMany({
         where,
         include: { items: { select: { id: true, descricao: true, quantity: true, totalPrice: true, ingredientId: true } } },
         orderBy: { createdAt: 'desc' },
         skip,
         take: parseInt(limit),
       }),
-      (req as any).prisma.invoice.count({ where }),
+      prisma.invoice.count({ where }),
     ])
 
     return res.json({ success: true, data: invoices, total, page: parseInt(page) })
@@ -118,7 +122,7 @@ router.get('/', tenantMiddleware, async (req: AuthRequest, res: Response) => {
 // Retorna itens da NF sem mapeamento de ingrediente (para corrigir depois)
 router.get('/:id/unmapped', tenantMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    const { id }   = req.params
+    const id = String(req.params.id ?? '')
     const tenantId = req.tenantId!
     const items    = await getUnmappedItems(tenantId, id)
     return res.json({ success: true, data: items })
