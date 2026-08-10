@@ -132,7 +132,7 @@ function StatCard({
   return (
     <div className="flex flex-col gap-1 rounded-card border border-line bg-surface p-4">
       <p className="text-xs font-medium uppercase tracking-wide text-slate">{label}</p>
-      <p className={`font-mono text-xl font-semibold ${valueTone}`}>{value}</p>
+      <p className={`text-xl font-semibold ${valueTone}`}>{value}</p>
       {hint && <p className="text-xs leading-relaxed text-slate">{hint}</p>}
     </div>
   )
@@ -225,7 +225,7 @@ function OpenCashCard({
                 inputMode="decimal"
                 value={opening}
                 onChange={(e) => setOpening(e.target.value)}
-                className="w-full bg-transparent font-mono text-base text-ink outline-none"
+                className="w-full bg-transparent text-base text-ink outline-none"
               />
             </div>
             <p className="text-xs leading-relaxed text-slate">
@@ -381,7 +381,7 @@ function EntryForm({
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               placeholder="0,00"
-              className="w-full bg-transparent font-mono text-sm text-ink outline-none"
+              className="w-full bg-transparent text-sm text-ink outline-none"
             />
           </div>
         </div>
@@ -503,7 +503,7 @@ function CloseCashCard({
             value={counted}
             onChange={(e) => setCounted(e.target.value)}
             placeholder="0,00"
-            className="w-full bg-transparent font-mono text-base text-ink outline-none"
+            className="w-full bg-transparent text-base text-ink outline-none"
           />
         </div>
       </div>
@@ -512,12 +512,12 @@ function CloseCashCard({
         <dl className="flex flex-col gap-1 rounded-md border border-line bg-canvas px-3 py-2.5 text-sm">
           <div className="flex items-center justify-between gap-3">
             <dt className="text-slate">Esperado</dt>
-            <dd className="font-mono text-ink">{brl(expectedCash)}</dd>
+            <dd className="text-ink">{brl(expectedCash)}</dd>
           </div>
           <div className="flex items-center justify-between gap-3">
             <dt className="text-slate">Diferença</dt>
             <dd
-              className={`font-mono font-semibold ${
+              className={`font-semibold ${
                 difference === 0 ? 'text-good' : difference > 0 ? 'text-warn' : 'text-bad'
               }`}
             >
@@ -627,7 +627,7 @@ function EntryList({ registerId }: { registerId: string }) {
             </div>
 
             <span
-              className={`shrink-0 font-mono text-sm font-semibold ${
+              className={`shrink-0 text-sm font-semibold ${
                 inflow ? 'text-good' : 'text-bad'
               }`}
             >
@@ -681,13 +681,13 @@ function ClosedHistory() {
 
             <div className="text-right">
               <p className="text-xs uppercase tracking-wide text-slate">Contado</p>
-              <p className="font-mono text-sm text-ink">{brl(Number(row.closingBalance ?? 0))}</p>
+              <p className="text-sm text-ink">{brl(Number(row.closingBalance ?? 0))}</p>
             </div>
 
             <div className="text-right">
               <p className="text-xs uppercase tracking-wide text-slate">Diferença</p>
               <p
-                className={`font-mono text-sm font-semibold ${
+                className={`text-sm font-semibold ${
                   diff === 0 ? 'text-good' : diff > 0 ? 'text-warn' : 'text-bad'
                 }`}
               >
@@ -782,7 +782,7 @@ export function CashRegisterPage() {
                 Desde {dateTime(register.openedAt)} por {personName(register.openedBy)}
               </p>
             </div>
-            <span className="font-mono text-xs text-ink">
+            <span className="text-xs text-ink">
               {summary.salesCount} venda{summary.salesCount === 1 ? '' : 's'}
             </span>
           </div>
@@ -828,7 +828,7 @@ export function CashRegisterPage() {
                     <span className="text-xs font-medium uppercase tracking-wide text-slate">
                       {METHOD_LABEL[method] ?? method}
                     </span>
-                    <span className="font-mono text-sm font-semibold text-ink">
+                    <span className="text-sm font-semibold text-ink">
                       {brl(info.amount)}
                     </span>
                     <span className="text-xs text-slate">

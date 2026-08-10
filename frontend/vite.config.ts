@@ -35,13 +35,32 @@ export default defineConfig(async () => {
         lang: 'pt-BR',
         start_url: '/',
         display: 'standalone',
-        background_color: '#0b1120',
-        theme_color: '#0b1120',
+        // Vinho da identidade, igual ao `theme-color` do index.html: com o navy
+        // antigo a tela de abertura do app instalado piscava azul antes de
+        // carregar a interface, que e vinho.
+        background_color: '#3e0f27',
+        theme_color: '#3e0f27',
+        // Gerados por `python3 scripts/generate-icons.py`.
         icons: [
-          { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
-          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+          {
+            src: '/icons/icon-192.png',
+            sizes: '192x192',
+            type: 'image/png',
+            purpose: 'any',
+          },
           {
             src: '/icons/icon-512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'any',
+          },
+          // Arquivo PROPRIO para maskable, nao o icon-512 de novo. O Android
+          // recorta o icone maskable num circulo: reaproveitar o icone comum
+          // (que ja tem cantos arredondados e transparentes) resultava em borda
+          // cortada e desenho encostando no limite do recorte. Este e
+          // full-bleed e tem o desenho encolhido para dentro da zona segura.
+          {
+            src: '/icons/icon-maskable-512.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'maskable',
@@ -114,6 +133,11 @@ export default defineConfig(async () => {
         // Sem este proxy, `/api/...` bateria no Vite e devolveria 404 —
         // era a causa do login falhar mesmo com o backend no ar.
         '/api': { target: API_TARGET, changeOrigin: true },
+        // As fotos de produto sao servidas do disco do backend. Sem este proxy,
+        // `<img src="/uploads/...">` bateria no Vite e a imagem nao carregaria em
+        // desenvolvimento. Com ele, o MESMO caminho relativo gravado no banco
+        // funciona em dev e em producao, sem host fixo dentro do dado.
+        '/uploads': { target: API_TARGET, changeOrigin: true },
         '/socket.io': { target: API_TARGET, ws: true, changeOrigin: true },
       },
     },

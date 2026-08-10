@@ -234,7 +234,7 @@ export function KitchenDisplay() {
                 <h3 className="text-sm font-semibold tracking-wide text-ink uppercase">
                   {col.label}
                 </h3>
-                <span className="font-mono text-sm text-slate">{col.orders.length}</span>
+                <span className="text-sm text-slate">{col.orders.length}</span>
               </div>
 
               {col.orders.length === 0 ? (
@@ -251,14 +251,14 @@ export function KitchenDisplay() {
                       className="flex flex-col gap-3 rounded-lg border border-line bg-surface p-3.5"
                     >
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-lg font-bold text-ink">
+                        <span className="text-lg font-bold text-ink">
                           #{order.orderNumber}
                         </span>
                         <span className="rounded bg-canvas px-1.5 py-0.5 text-xs font-medium text-slate">
                           {TYPE_LABEL[order.orderType] ?? order.orderType}
                         </span>
                         <span
-                          className={`ml-auto rounded px-1.5 py-0.5 font-mono text-xs font-bold ${ageTone(minutes)}`}
+                          className={`ml-auto rounded px-1.5 py-0.5 text-xs font-bold ${ageTone(minutes)}`}
                         >
                           {minutes} min
                         </span>
@@ -267,7 +267,7 @@ export function KitchenDisplay() {
                       <ul className="flex flex-col gap-1.5 text-sm text-ink">
                         {(order.orderItems ?? []).map((item) => (
                           <li key={item.id} className="leading-relaxed">
-                            <span className="font-mono font-semibold">{item.quantity}×</span>{' '}
+                            <span className="font-semibold">{item.quantity}×</span>{' '}
                             {item.product?.name ?? 'Item'}
                             {item.selectedProteinName && (
                               <span className="text-slate"> — {item.selectedProteinName}</span>

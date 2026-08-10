@@ -1,8 +1,10 @@
 /**
  * Frente de caixa (PDV).
  *
- * Tela de operacao, nao de gestao: roda em tela cheia, no escuro, com alvos de
- * toque grandes e o total sempre visivel. As decisoes principais:
+ * Tela de operacao, nao de gestao: alvos de toque grandes, area de trabalho
+ * clara (a cozinha e iluminada, e fundo escuro reflete) e o total sempre
+ * visivel. Ela vive ao lado do menu recolhido, montada por `pages/App.tsx`.
+ * As decisoes principais:
  *
  * 1. **Sem caixa aberto, sem venda.** O servidor recusa (`CASH_CLOSED`) e a tela
  *    tambem bloqueia antes de o operador montar a comanda inteira e descobrir no
@@ -28,6 +30,7 @@ import {
   CheckCircle2,
   Lock,
   LogOut,
+  Menu,
   Percent,
   Printer,
   ShoppingBag,
@@ -66,7 +69,17 @@ import {
   type Product,
 } from './pdv/types'
 
-export function PDV() {
+interface PDVProps {
+  /**
+   * Abre a gaveta de navegacao no celular.
+   *
+   * O estado vive no shell (`pages/App.tsx`), que e quem desenha o `SideNav`.
+   * No desktop o trilho recolhido ja esta a vista e este botao fica oculto.
+   */
+  onOpenMenu?: () => void
+}
+
+export function PDV({ onOpenMenu }: PDVProps) {
   const { activeTenant } = useTenant()
   const { user, logout, can } = useAuth()
   const { printKitchen, printDelivery } = usePrinter()
@@ -190,7 +203,7 @@ export function PDV() {
     })
   }, [products, activeCategory, search])
 
-  // ── Totais ────────────────────────────────────────────────────────────────
+  // ── Totais ───────────────────────────────────────────────���────────────────
   const subtotal = round2(cart.reduce((sum, item) => sum + lineTotal(item), 0))
 
   const zones = activeTenant?.deliveryZones ?? []
@@ -428,35 +441,41 @@ export function PDV() {
     : null
 
   return (
-    // Area de trabalho CLARA e cromo ESCURO, como manda o tema do sistema (ver
-    // index.css): a tela e operada sob a luz forte de uma cozinha, onde fundo
-    // escuro reflete e cansa. So a barra superior e escura, para separar
-    // "navegacao" de "operacao" sem precisar de moldura decorativa.
-    <div className="flex h-screen flex-col overflow-hidden bg-canvas">
+    // `h-full`, e nao `h-screen`: o shell em `pages/App.tsx` ja define a altura
+    // da janela: repetir `h-screen` aqui somaria a altura do menu e criaria uma
+    // barra de rolagem na pagina inteira — justamente o que o PDV nao pode ter,
+    // porque grade e comanda rolam por dentro.
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-canvas">
       {/* ── Barra superior ─────────────────────────────────────────────── */}
-      <header className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 bg-ink px-4 py-2.5">
-        <div className="flex items-center gap-2.5">
-          <span
-            aria-hidden="true"
-            className="flex h-8 w-8 items-center justify-center rounded-md bg-brand font-mono text-sm font-bold text-white"
+      <header className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-line bg-surface px-4 py-2.5">
+        {/* Gaveta de navegacao no celular, onde o trilho lateral nao cabe. */}
+        {onOpenMenu && (
+          <button
+            type="button"
+            onClick={onOpenMenu}
+            aria-label="Abrir menu"
+            className="-ml-1 rounded-md p-1.5 text-slate transition-colors hover:bg-canvas hover:text-ink lg:hidden"
           >
-            D
-          </span>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-white">
-              {activeTenant?.name ?? 'PDV'}
-            </p>
-            <p className="text-[0.6875rem] text-white/40">
-              {user?.firstName} {user?.lastName}
-            </p>
-          </div>
+            <Menu aria-hidden="true" className="h-5 w-5" />
+          </button>
+        )}
+
+        {/* O nome da loja ja aparece no menu ao lado; repeti-lo aqui gastaria a
+            melhor area da barra com a informacao que o operador menos consulta.
+            No lugar dele, o que ele de fato precisa: o que esta fazendo agora e
+            quem esta logado (importa quando o turno troca no meio do dia). */}
+        <div className="min-w-0">
+          <p className="truncate font-display text-base leading-tight text-plum">Novo pedido</p>
+          <p className="truncate text-[0.6875rem] text-slate">
+            {user?.firstName} {user?.lastName}
+          </p>
         </div>
 
         {/* Tipo de pedido: define taxa de entrega e o que a comanda imprime */}
         <div
           role="group"
           aria-label="Tipo de pedido"
-          className="flex gap-1 rounded-md bg-ink-soft p-1"
+          className="flex gap-1 rounded-lg bg-canvas p-1"
         >
           {(['balcao', 'retirada', 'delivery'] as OrderType[]).map((type) => {
             const active = orderType === type
@@ -467,8 +486,8 @@ export function PDV() {
                 type="button"
                 onClick={() => setOrderType(type)}
                 aria-pressed={active}
-                className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium transition-colors ${
-                  active ? 'bg-brand text-white' : 'text-white/60 hover:text-white'
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                  active ? 'bg-plum text-cream' : 'text-slate hover:text-ink'
                 }`}
               >
                 <Icon aria-hidden="true" className="h-3.5 w-3.5" />
@@ -498,18 +517,16 @@ export function PDV() {
           {cash.isOpen ? (
             <Link
               to="/caixa"
-              className="flex items-center gap-2 rounded-md bg-good/15 px-2.5 py-1.5 text-xs font-semibold text-good transition-colors hover:bg-good/25"
+              className="flex items-center gap-2 rounded-md bg-good-soft px-2.5 py-1.5 text-xs font-semibold text-good transition-colors hover:brightness-95"
             >
               <span className="h-1.5 w-1.5 rounded-full bg-good" aria-hidden="true" />
               Caixa aberto
               {cash.summary && (
-                <span className="font-mono tabular-nums opacity-80">
-                  {brl(cash.summary.expectedCash)}
-                </span>
+                <span className="tabular-nums opacity-80">{brl(cash.summary.expectedCash)}</span>
               )}
             </Link>
           ) : (
-            <span className="flex items-center gap-1.5 rounded-md bg-bad/15 px-2.5 py-1.5 text-xs font-semibold text-bad">
+            <span className="flex items-center gap-1.5 rounded-md bg-bad-soft px-2.5 py-1.5 text-xs font-semibold text-bad">
               <Lock aria-hidden="true" className="h-3 w-3" />
               Caixa fechado
             </span>
@@ -520,7 +537,7 @@ export function PDV() {
             onClick={logout}
             aria-label="Sair do sistema"
             title="Sair"
-            className="rounded-md p-1.5 text-white/40 transition-colors hover:bg-white/10 hover:text-white"
+            className="rounded-md p-1.5 text-slate transition-colors hover:bg-canvas hover:text-ink"
           >
             <LogOut aria-hidden="true" className="h-4 w-4" />
           </button>
@@ -535,12 +552,12 @@ export function PDV() {
           <div className="flex max-w-md flex-col items-center gap-4 text-center">
             <span
               aria-hidden="true"
-              className="flex h-14 w-14 items-center justify-center rounded-full bg-bad/15"
+              className="flex h-14 w-14 items-center justify-center rounded-full bg-bad-soft"
             >
               <Lock className="h-6 w-6 text-bad" />
             </span>
             <div>
-              <h2 className="text-lg font-semibold text-ink">O caixa está fechado</h2>
+              <h2 className="font-display text-xl text-plum">O caixa está fechado</h2>
               <p className="mt-1.5 text-sm text-slate">
                 Toda venda precisa pertencer a um turno de caixa, para que o fechamento confira
                 com o dinheiro na gaveta. Abra o caixa para começar a vender.
@@ -549,7 +566,7 @@ export function PDV() {
             {can('cash:operate') ? (
               <Link
                 to="/caixa"
-                className="rounded-md bg-brand px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-brand-strong"
+                className="rounded-lg bg-brand px-5 py-3 text-sm font-bold text-brand-ink transition-colors hover:bg-brand-strong"
               >
                 Abrir o caixa
               </Link>
@@ -600,7 +617,7 @@ export function PDV() {
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                     placeholder="Opcional"
-                    className="rounded-md border border-line bg-surface px-3 py-2 font-mono text-sm tabular-nums text-ink focus:border-brand focus:outline-none"
+                    className="rounded-md border border-line bg-surface px-3 py-2 text-sm tabular-nums text-ink focus:border-brand focus:outline-none"
                   />
                 </label>
 
@@ -663,7 +680,7 @@ export function PDV() {
                     value={discount || ''}
                     onChange={(e) => setDiscount(Math.max(0, Number(e.target.value)))}
                     placeholder="0,00"
-                    className="rounded-md border border-line bg-surface px-3 py-2 font-mono text-sm tabular-nums text-ink focus:border-brand focus:outline-none"
+                    className="rounded-md border border-line bg-surface px-3 py-2 text-sm tabular-nums text-ink focus:border-brand focus:outline-none"
                   />
                 </label>
 
@@ -741,7 +758,7 @@ export function PDV() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="done-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/85 p-6 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-plum/85 p-6 backdrop-blur-sm"
         >
           <div className="flex w-full max-w-sm flex-col items-center gap-4 rounded-2xl bg-surface p-6 text-center shadow-2xl">
             <span
@@ -751,22 +768,26 @@ export function PDV() {
               <CheckCircle2 className="h-7 w-7 text-good" />
             </span>
             <div>
-              <h2 id="done-title" className="text-lg font-semibold text-ink">
+              <h2 id="done-title" className="font-display text-xl text-plum">
                 Venda registrada
               </h2>
               <p className="mt-1 text-sm text-slate">
-                Pedido <span className="font-mono font-semibold">#{lastSale.order.orderNumber}</span>{' '}
-                · {brl(Number(lastSale.order.totalAmount) || 0)}
+                Pedido{' '}
+                <span className="font-semibold tabular-nums">#{lastSale.order.orderNumber}</span> ·{' '}
+                {brl(Number(lastSale.order.totalAmount) || 0)}
               </p>
             </div>
 
-            {/* Troco em destaque: e a ultima coisa que falta fazer */}
+            {/* Troco em destaque: e a ultima coisa que falta fazer. Em bronze
+                (`text-accent`), nao no dourado da marca: dourado sobre o creme
+                do bloco nao alcanca contraste de leitura, e este e um numero
+                que precisa ser conferido nota a nota. */}
             {lastSale.change > 0 && (
               <div className="w-full rounded-card bg-brand-soft px-4 py-3">
-                <p className="text-xs font-semibold tracking-wide text-brand-strong uppercase">
+                <p className="text-xs font-semibold tracking-wide text-accent uppercase">
                   Troco a devolver
                 </p>
-                <p className="font-mono text-3xl font-bold tabular-nums text-brand-strong">
+                <p className="font-display text-3xl tabular-nums text-plum">
                   {brl(lastSale.change)}
                 </p>
               </div>
@@ -783,7 +804,7 @@ export function PDV() {
               type="button"
               onClick={() => setLastSale(null)}
               autoFocus
-              className="w-full rounded-md bg-brand py-3 text-base font-semibold text-white transition-colors hover:bg-brand-strong"
+              className="w-full rounded-lg bg-brand py-3 text-base font-bold text-brand-ink transition-colors hover:bg-brand-strong"
             >
               Nova venda
             </button>

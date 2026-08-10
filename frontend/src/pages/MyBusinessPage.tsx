@@ -439,7 +439,7 @@ export function MyBusinessPage() {
                           type="time"
                           value={w.from}
                           onChange={(e) => updateWindow(key, index, { from: e.target.value })}
-                          className="rounded-md border border-line bg-canvas px-2 py-1.5 font-mono text-sm text-ink disabled:opacity-60"
+                          className="rounded-md border border-line bg-canvas px-2 py-1.5 text-sm text-ink disabled:opacity-60"
                         />
                         <span aria-hidden="true" className="text-sm text-slate">
                           às
@@ -452,7 +452,7 @@ export function MyBusinessPage() {
                           type="time"
                           value={w.to}
                           onChange={(e) => updateWindow(key, index, { to: e.target.value })}
-                          className="rounded-md border border-line bg-canvas px-2 py-1.5 font-mono text-sm text-ink disabled:opacity-60"
+                          className="rounded-md border border-line bg-canvas px-2 py-1.5 text-sm text-ink disabled:opacity-60"
                         />
                         {isOwner && (
                           <button

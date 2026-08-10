@@ -157,7 +157,7 @@ export function PaymentDialog({ total, submitting, error, onCancel, onConfirm }:
           {/* Total a pagar */}
           <div className="flex items-baseline justify-between rounded-card bg-canvas px-4 py-3">
             <span className="text-sm font-medium text-slate">Total a pagar</span>
-            <span className="font-mono text-2xl font-bold tabular-nums text-ink">{brl(total)}</span>
+            <span className="text-2xl font-bold tabular-nums text-ink">{brl(total)}</span>
           </div>
 
           {/* Parcelas */}
@@ -221,7 +221,7 @@ export function PaymentDialog({ total, submitting, error, onCancel, onConfirm }:
                       min="0"
                       value={Number.isFinite(split.amount) ? split.amount : ''}
                       onChange={(e) => setAmount(split.id, Number(e.target.value))}
-                      className="w-32 rounded-md border border-line bg-surface px-3 py-2 font-mono text-base tabular-nums text-ink focus:border-brand focus:outline-none"
+                      className="w-32 rounded-md border border-line bg-surface px-3 py-2 text-base tabular-nums text-ink focus:border-brand focus:outline-none"
                     />
                   </label>
                   {splits.length > 1 && (
@@ -255,7 +255,7 @@ export function PaymentDialog({ total, submitting, error, onCancel, onConfirm }:
                         onChange={(e) =>
                           setChangeFor(split.id, e.target.value === '' ? null : Number(e.target.value))
                         }
-                        className="w-36 rounded-md border border-line bg-surface px-3 py-2 font-mono text-base tabular-nums text-ink focus:border-brand focus:outline-none"
+                        className="w-36 rounded-md border border-line bg-surface px-3 py-2 text-base tabular-nums text-ink focus:border-brand focus:outline-none"
                       />
                       {/* Atalhos de cedula: o operador clica na nota que recebeu */}
                       {CASH_NOTES.filter((n) => n >= split.amount).slice(0, 4).map((note) => (
@@ -263,7 +263,7 @@ export function PaymentDialog({ total, submitting, error, onCancel, onConfirm }:
                           key={note}
                           type="button"
                           onClick={() => setChangeFor(split.id, note)}
-                          className="rounded-md bg-canvas px-2.5 py-1.5 font-mono text-xs font-semibold tabular-nums text-ink transition-colors hover:bg-line"
+                          className="rounded-md bg-canvas px-2.5 py-1.5 text-xs font-semibold tabular-nums text-ink transition-colors hover:bg-line"
                         >
                           {note}
                         </button>
@@ -322,7 +322,7 @@ export function PaymentDialog({ total, submitting, error, onCancel, onConfirm }:
                   {missing > 0 ? 'Ainda falta' : 'Passou do total'}
                 </span>
                 <span
-                  className={`font-mono text-xl font-bold tabular-nums ${
+                  className={`text-xl font-bold tabular-nums ${
                     missing > 0 ? 'text-warn' : 'text-bad'
                   }`}
                 >
@@ -332,14 +332,14 @@ export function PaymentDialog({ total, submitting, error, onCancel, onConfirm }:
             ) : change > 0 ? (
               <div className="flex flex-col">
                 <span className="text-xs font-medium text-slate">Troco para o cliente</span>
-                <span className="font-mono text-xl font-bold tabular-nums text-good">
+                <span className="text-xl font-bold tabular-nums text-good">
                   {brl(change)}
                 </span>
               </div>
             ) : (
               <div className="flex flex-col">
                 <span className="text-xs font-medium text-slate">Pagamento</span>
-                <span className="font-mono text-xl font-bold tabular-nums text-good">Exato</span>
+                <span className="text-xl font-bold tabular-nums text-good">Exato</span>
               </div>
             )}
 

@@ -7,7 +7,9 @@
     "dev": "concurrently -n \"api,web\" -c \"cyan,magenta\" \"pnpm --filter delivery-erp-backend dev\" \"pnpm --filter delivery-erp-frontend dev\"",
     "dev:api": "pnpm --filter delivery-erp-backend dev",
     "dev:web": "pnpm --filter delivery-erp-frontend dev",
-    "dev:mobile": "cross-env-shell VITE_HTTPS=true concurrently -n \"api,web\" -c \"cyan,magenta\" \"pnpm --filter delivery-erp-backend dev\" \"pnpm --filter delivery-erp-frontend dev\"",
+    "dev:mobile": "node scripts/mobile-url.mjs && cross-env-shell VITE_HTTPS=true concurrently -n \"api,web\" -c \"cyan,magenta\" \"pnpm --filter delivery-erp-backend dev\" \"pnpm --filter delivery-erp-frontend dev\"",
+    "mobile:url": "node scripts/mobile-url.mjs",
+    "icons": "python3 frontend/scripts/generate-icons.py",
     "build": "pnpm --filter delivery-erp-backend build && pnpm --filter delivery-erp-frontend build",
     "start": "pnpm --filter delivery-erp-backend start",
     "typecheck": "pnpm --filter delivery-erp-backend typecheck && pnpm --filter delivery-erp-frontend typecheck",
@@ -24,6 +26,7 @@
     "concurrently": "^9.1.2",
     "cross-env": "^10.1.0",
     "embedded-postgres": "18.4.0-beta.17",
+    "qrcode": "^1.5.4",
     "typescript": "^5.7.3"
   },
   "engines": {

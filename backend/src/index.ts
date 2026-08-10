@@ -13,7 +13,7 @@
 import express, { type Request, type Response } from 'express'
 import cors from 'cors'
 
-import { env } from './config/env.js'
+import { corsOriginCheck, env } from './config/env.js'
 import { prisma } from './lib/prisma.js'
 import { errorHandler, notFoundHandler } from './lib/http.js'
 import {
@@ -43,6 +43,7 @@ import storeRoutes from './routes/storeRoutes.js'
 import publicRoutes from './routes/publicRoutes.js'
 import tenantRoutes from './routes/tenantRoutes.js'
 import userRoutes from './routes/userRoutes.js'
+import { uploadRoutes, UPLOAD_ROOT } from './routes/uploadRoutes.js'
 
 const app = express()
 
@@ -50,7 +51,9 @@ app.set('trust proxy', 1)
 
 app.use(
   cors({
-    origin: env.corsOrigins,
+    // Funcao, nao lista: em desenvolvimento tambem aceita IPs de LAN privada,
+    // para o scanner no celular funcionar sem editar o .env a cada rede nova.
+    origin: corsOriginCheck,
     credentials: true,
   }),
 )
@@ -90,6 +93,30 @@ app.use('/api/auth', authLimiter, authRoutes)
 // Cardapio publico e acompanhamento de pedido: sem login, escopado por slug.
 app.use('/api/public', publicRoutes)
 
+/**
+ * Fotos de produto, servidas sem login.
+ *
+ * Publico de proposito: as mesmas imagens aparecem no cardapio publico, que nao
+ * tem sessao. O nome do arquivo e sorteado (16 bytes), entao a URL nao pode ser
+ * adivinhada nem enumerada a partir do id do produto.
+ *
+ * `contentType` fixado no `setHeaders` junto ao `nosniff` global: sem isso, um
+ * arquivo cuja extensao nao case com o conteudo poderia ser interpretado como
+ * HTML pelo navegador e executar script no nosso dominio. `index: false` e
+ * `dotfiles: 'deny'` evitam listagem de pasta e arquivos ocultos.
+ */
+app.use(
+  '/uploads',
+  express.static(UPLOAD_ROOT, {
+    index: false,
+    dotfiles: 'deny',
+    maxAge: '30d', // nome sorteado = arquivo imutavel: cache longo e seguro
+    setHeaders: (res) => {
+      res.setHeader('X-Content-Type-Options', 'nosniff')
+    },
+  }),
+)
+
 // ---------- Rotas protegidas ----------
 
 // Negocios da conta e equipe. Ambas montam o proprio `authenticate` internamente
@@ -102,6 +129,10 @@ app.use('/api/users', userRoutes)
 // sem isto, um funcionario poderia chamar a API direto pela URL.
 // A permissao de LEITURA e exigida no mount; a de escrita fica dentro de cada
 // rota, no verbo que altera dados.
+// Envio de imagem. A permissao de escrita (`products:manage`) e cobrada dentro
+// da rota, junto da validacao de tipo e tamanho.
+app.use('/api/uploads', authenticate, uploadRoutes)
+
 app.use('/api/ingredients', authenticate, requirePermission('ingredients:view'), ingredientRoutes)
 // `pdv:use` tambem libera a LEITURA de produtos, cardapio e clientes: quem opera
 // o caixa precisa ver o que esta vendendo e buscar o cliente pelo telefone.
@@ -145,7 +176,9 @@ const server = app.listen(env.PORT, () => {
 
 // ---------- Tempo real (KDS e acompanhamento do pedido) ----------
 const io = new SocketIOServer(server, {
-  cors: { origin: env.corsOrigins, credentials: true },
+  // Mesma regra do CORS do Express: sem isso o app abriria no celular e o
+  // tempo real (KDS, acompanhamento do pedido) silenciosamente nao conectaria.
+  cors: { origin: corsOriginCheck, credentials: true },
 })
 
 // Cada socket precisa provar quem e antes de entrar na sala da loja,

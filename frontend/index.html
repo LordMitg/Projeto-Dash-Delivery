@@ -2,20 +2,40 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      Apontava para /vite.svg, sobra do template, que nao existe em public/: a
+      aba ficava com o icone genrico de documento e cada visita registrava um
+      404. O favicon.svg da marca sempre esteve ali, sem ser usado.
+    -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- O iOS ignora o manifest para o icone da tela inicial; precisa desta tag. -->
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <meta name="theme-color" content="#3e0f27" />
+    <!--
+      `viewport-fit=cover` + as safe-area no CSS: sem isso a barra inferior do
+      iPhone cobre os botoes de acao quando o app roda em tela cheia (standalone).
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
 
     <!--
-      O index.css pede 'Inter' e 'JetBrains Mono', mas nenhuma das duas era
-      carregada: o navegador caia no fallback do sistema e a interface inteira
-      ficava com a fonte errada. Sao as duas unicas familias do projeto - Inter
-      para texto e JetBrains Mono para valores, onde o alinhamento dos digitos
-      importa (preco, troco, conferencia de caixa).
+      Tres arquivos, dois papeis de interface:
+
+      - Inter: todo o texto e, com `tabular-nums`, tambem os valores na tela. Os
+        digitos ja saem de largura fixa, entao o preco nao "danca" ao atualizar
+        sem precisar de uma fonte monoespacada so para isso.
+      - Fraunces: exclusiva da assinatura da marca no menu. E o unico lugar em
+        que aparece, e por isso pede um peso so.
+      - JetBrains Mono: NAO e fonte de interface. Ficou para a impressao da
+        comanda, onde a bobina termica precisa de largura fixa de verdade para as
+        colunas de item e valor alinharem no papel.
     -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
 

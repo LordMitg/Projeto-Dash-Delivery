@@ -111,7 +111,7 @@ export function ItemDialog({ product, initial, onCancel, onConfirm }: Props) {
             <h2 id="item-title" className="truncate text-lg font-semibold text-ink">
               {product.name}
             </h2>
-            <p className="mt-0.5 font-mono text-sm tabular-nums text-slate">
+            <p className="mt-0.5 text-sm tabular-nums text-slate">
               {brl(Number(product.price) || 0)}
             </p>
           </div>
@@ -176,7 +176,7 @@ export function ItemDialog({ product, initial, onCancel, onConfirm }: Props) {
                     >
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium text-ink">{row.name}</p>
-                        <p className="font-mono text-xs tabular-nums text-slate">
+                        <p className="text-xs tabular-nums text-slate">
                           + {brl(Number(row.price) || 0)}
                           {row.maxQuantity > 1 && ` · até ${row.maxQuantity}`}
                         </p>
@@ -191,7 +191,7 @@ export function ItemDialog({ product, initial, onCancel, onConfirm }: Props) {
                         >
                           <Minus aria-hidden="true" className="h-4 w-4" />
                         </button>
-                        <span className="w-6 text-center font-mono text-sm font-semibold tabular-nums text-ink">
+                        <span className="w-6 text-center text-sm font-semibold tabular-nums text-ink">
                           {qty}
                         </span>
                         <button
@@ -246,7 +246,7 @@ export function ItemDialog({ product, initial, onCancel, onConfirm }: Props) {
             >
               <Minus aria-hidden="true" className="h-5 w-5" />
             </button>
-            <span className="w-10 text-center font-mono text-xl font-bold tabular-nums text-ink">
+            <span className="w-10 text-center text-xl font-bold tabular-nums text-ink">
               {quantity}
             </span>
             <button
@@ -266,7 +266,7 @@ export function ItemDialog({ product, initial, onCancel, onConfirm }: Props) {
             className="flex flex-1 items-center justify-center gap-2 rounded-md bg-brand px-5 py-3 text-base font-semibold text-white transition-colors hover:bg-brand-strong disabled:cursor-not-allowed disabled:bg-slate/40"
           >
             <span>{initial ? 'Salvar' : 'Adicionar'}</span>
-            <span className="font-mono tabular-nums">{brl(lineTotal)}</span>
+            <span className="tabular-nums">{brl(lineTotal)}</span>
           </button>
         </footer>
       </div>

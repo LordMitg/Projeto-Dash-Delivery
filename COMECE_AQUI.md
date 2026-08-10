@@ -183,11 +183,25 @@ netstat -ano | findstr :3000
 
 ### O scanner pelo celular não conecta
 
-Acrescente o IP do seu PC ao `CORS_ORIGINS` do `backend/.env`, por exemplo
-`https://192.168.0.10:3000`. Para descobrir o IP:
+Rode `pnpm dev:mobile` (não o `pnpm dev`). Ele liga o HTTPS — a câmera **só**
+funciona em conexão segura — e imprime o endereço com um QR Code para você abrir
+no celular sem digitar nada.
 
-- Windows: `ipconfig` (procure "Endereço IPv4")
-- Linux/macOS: `hostname -I`
+Não é mais preciso descobrir o IP nem editar o `CORS_ORIGINS`: em
+desenvolvimento a API aceita automaticamente qualquer IP de rede local
+(`192.168.x.x`, `10.x.x.x`, `172.16-31.x.x`).
+
+Checklist se ainda não abrir:
+
+1. **Celular e PC no mesmo Wi-Fi** (não na rede 4G do celular).
+2. O aviso de **"conexão não privada" é esperado** — o certificado é local.
+   Toque em *Avançado → Prosseguir*.
+3. Se o celular **recusar** sem oferecer "prosseguir", rode `mkcert -install`
+   no PC uma única vez.
+4. Se estiver numa **VPN**, desligue-a: o IP da VPN não é alcançável pelo
+   celular, e o `pnpm dev:mobile` avisa quando é esse o caso.
+5. O **firewall do Windows** pode bloquear a porta 3000 na primeira vez —
+   quando ele perguntar, permita o acesso em redes privadas.
 
 ---
 

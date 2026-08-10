@@ -29,7 +29,7 @@ export function AuthShell({
         <div className="flex items-center gap-3">
           <span
             aria-hidden="true"
-            className="flex h-9 w-9 items-center justify-center rounded-md bg-brand font-mono text-base font-bold text-white"
+            className="flex h-9 w-9 items-center justify-center rounded-md bg-brand text-base font-bold text-white"
           >
             D
           </span>

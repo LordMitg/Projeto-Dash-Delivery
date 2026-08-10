@@ -79,13 +79,65 @@ if (!parsed.success) {
 
 const raw = parsed.data
 
+const corsOrigins = raw.CORS_ORIGINS.split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean)
+
+const isDevelopment = raw.NODE_ENV === 'development'
+
+/**
+ * IPs de rede LOCAL: 192.168.x.x, 10.x.x.x e 172.16-31.x.x.
+ *
+ * As faixas privadas da RFC 1918 — o endereco que o roteador de casa da ao PC.
+ * Note o `172\.(1[6-9]|2\d|3[01])`: a faixa privada do 172 vai so de 16 a 31,
+ * e um `172\.\d+` liberaria enderecos publicos.
+ */
+const PRIVATE_LAN_ORIGIN =
+  /^https?:\/\/(192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})(?::\d+)?$/
+
+/**
+ * Decide se uma origem pode chamar a API.
+ *
+ * Existe por causa do scanner no celular: a camera exige HTTPS, o celular acessa
+ * pelo IP do PC (`https://192.168.0.10:3000`) e esse IP muda de rede para rede.
+ * Antes era preciso descobrir o IP, escrever no `CORS_ORIGINS` e reiniciar o
+ * backend — e o sintoma de esquecer era cruel: a tela abria normalmente no
+ * celular e TODA chamada morria no CORS, sem erro visivel fora do console.
+ *
+ * Em desenvolvimento, qualquer IP de LAN privada e aceito. Em producao, apenas a
+ * lista explicita, porque ai a origem e um dominio conhecido e liberar faixas
+ * inteiras seria uma brecha.
+ */
+export function isOriginAllowed(origin: string | undefined): boolean {
+  // Sem `Origin`: mesma origem, curl ou app nativo. O navegador nao omite esse
+  // header em requisicao cross-origin, entao isso nao e uma brecha de CORS.
+  if (!origin) return true
+  if (corsOrigins.includes(origin)) return true
+  return isDevelopment && PRIVATE_LAN_ORIGIN.test(origin)
+}
+
+/**
+ * No formato que o `cors` e o Socket.IO esperam.
+ *
+ * Nega com `callback(null, false)` em vez de `callback(new Error(...))`: passar um
+ * Error faz o middleware lancar, e o error handler devolvia **500** para uma
+ * origem barrada. Um 500 diz "o servidor quebrou" quando na verdade a requisicao
+ * foi corretamente recusada — o log de producao encheria de falso alarme. Sem o
+ * header `Access-Control-Allow-Origin`, o navegador ja bloqueia a chamada, que e
+ * exatamente o efeito desejado.
+ */
+export const corsOriginCheck = (
+  origin: string | undefined,
+  callback: (err: Error | null, allow?: boolean) => void,
+): void => {
+  callback(null, isOriginAllowed(origin))
+}
+
 export const env = {
   ...raw,
   isProduction: raw.NODE_ENV === 'production',
-  isDevelopment: raw.NODE_ENV === 'development',
-  corsOrigins: raw.CORS_ORIGINS.split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean),
+  isDevelopment,
+  corsOrigins,
 } as const
 
 export type Env = typeof env

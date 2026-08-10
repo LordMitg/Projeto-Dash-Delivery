@@ -20,17 +20,46 @@
    =========================================================================== */
 
 @theme {
-  /* ---- Paleta: 3 neutros + 1 acento + 3 semanticos ---- */
-  --color-ink: #0b1120; /* navy quase preto: cromo e texto forte */
-  --color-ink-soft: #1c2637; /* navy elevado: cartoes dentro do cromo */
-  --color-slate: #64748b; /* texto secundario */
-  --color-line: #e2e8f0; /* divisorias na area clara */
-  --color-surface: #ffffff; /* cartoes */
-  --color-canvas: #f5f7fa; /* fundo da area de trabalho */
+  /* ---- Paleta: vinho (cromo) + dourado (acao) + creme (trabalho) ----
 
-  --color-brand: #f97316; /* ambar: acao primaria */
-  --color-brand-strong: #ea580c;
-  --color-brand-soft: #fff3e9;
+     TEXTO e CROMO sao tokens SEPARADOS de proposito.
+
+     Antes `--color-ink` era navy e servia para as duas coisas. Com a identidade
+     nova isso deixou de funcionar: o menu lateral pede um vinho saturado e
+     encorpado, mas usar esse mesmo vinho nos ~190 lugares que escrevem texto
+     deixaria a interface inteira com um tingimento roxo. Entao `ink` virou um
+     quase-preto quente (texto) e `plum` virou o vinho (menu, titulos). */
+  --color-ink: #2b1620; /* quase-preto quente: texto forte */
+  --color-ink-soft: #3a2029; /* superficie escura elevada */
+  --color-slate: #6e5c64; /* texto secundario (5.2:1 no creme) */
+  --color-line: #ece3da; /* divisorias mornas na area clara */
+  --color-surface: #ffffff; /* cartoes */
+  --color-canvas: #faf6f1; /* creme: fundo da area de trabalho */
+
+  --color-plum: #3e0f27; /* vinho: menu lateral e titulos */
+  --color-plum-soft: #55193a; /* vinho elevado: item em foco no menu */
+  --color-plum-deep: #2e0a1d; /* vinho profundo: rodape do menu */
+
+  /* Texto sobre o vinho. Branco puro sobre #3e0f27 vibra e cansa numa jornada
+     inteira de turno; este creme (14.9:1) assenta melhor e mantem a leitura. */
+  --color-cream: #f7ece4;
+
+  --color-brand: #e0a63a; /* dourado: PREENCHIMENTO da acao primaria */
+  --color-brand-strong: #c88f26; /* dourado no hover */
+  --color-brand-soft: #fbf0d9; /* dourado tenue: fundo de destaque */
+
+  /* Dourado e lindo como preenchimento e ILEGIVEL como texto: #e0a63a sobre
+     branco da ~2.5:1, longe dos 4.5:1 exigidos. Por isso ele nunca vira cor de
+     letra. Sao dois tokens para os dois papeis:
+
+     - `brand-ink`  = o que se escreve EM CIMA do dourado (vinho, 6.1:1)
+     - `accent`     = o dourado quando precisa ser TEXTO no claro (bronze, 6.4:1)
+
+     Sem essa separacao, o rotulo "Finalizar pedido" em branco sobre o botao
+     dourado sumiria sob a luz de uma cozinha — exatamente onde este sistema e
+     usado. */
+  --color-brand-ink: #3e0f27;
+  --color-accent: #8a5a0b;
 
   --color-good: #15803d; /* positivo: margem, estoque ok */
   --color-good-soft: #eafaef;
@@ -39,12 +68,20 @@
   --color-warn: #a16207; /* atencao: estoque baixo */
   --color-warn-soft: #fef7e6;
 
-  /* ---- Tipografia: 2 familias, conforme diretriz ---- */
+  /* ---- Tipografia ----
+     Duas familias na interface: uma serifada para a assinatura da marca e os
+     titulos de pagina, e a Inter para todo o resto.
+
+     A mono NAO e uma terceira familia de interface: ela ficou restrita a
+     impressao da comanda, onde a bobina termica precisa de largura fixa para as
+     colunas alinharem. Os precos na tela agora usam Inter com `tabular-nums`,
+     que ja trava a largura dos digitos — e e o que a referencia mostra. */
   --font-sans:
     'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
   --font-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, Menlo, monospace;
 
-  --radius-card: 0.75rem;
+  --radius-card: 0.875rem;
 }
 
 /* ---------------------------------------------------------------------------
@@ -114,8 +151,9 @@
     text-wrap: pretty;
   }
 
+  /* Bronze, nao o dourado da marca: link em #c88f26 sobre branco da ~2.9:1. */
   a {
-    color: var(--color-brand-strong);
+    color: var(--color-accent);
     text-decoration: none;
   }
 
@@ -151,7 +189,7 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: #cbd5e1;
+    background: #d9cabf;
     border-radius: 999px;
     border: 2px solid var(--color-canvas);
   }
@@ -196,13 +234,13 @@
     min-height: 100vh;
     padding: 1.25rem 1rem;
     overflow-y: auto;
-    background-color: var(--color-ink);
-    color: #e8edf5;
+    background-color: var(--color-plum);
+    color: #f3e7ec;
   }
 
   .sidebar-logo {
     padding-bottom: 1rem;
-    border-bottom: 1px solid #24314a;
+    border-bottom: 1px solid var(--color-plum-soft);
   }
 
   .sidebar-logo h2 {
@@ -223,34 +261,34 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: #7d8ba1;
+    color: #b79aa7;
   }
 
   .sidebar-card {
     padding: 0.75rem;
-    border: 1px solid #2c3a4f;
+    border: 1px solid var(--color-plum-soft);
     border-radius: 0.625rem;
-    background-color: var(--color-ink-soft);
+    background-color: var(--color-plum-soft);
   }
 
   .sidebar-card p {
-    color: #e8edf5;
+    color: #f3e7ec;
     font-weight: 500;
   }
 
   .sidebar-select {
     width: 100%;
     padding: 0.5rem 0.625rem;
-    border: 1px solid #2c3a4f;
+    border: 1px solid var(--color-plum-soft);
     border-radius: 0.5rem;
-    background-color: var(--color-ink-soft);
-    color: #e8edf5;
+    background-color: var(--color-plum-soft);
+    color: #f3e7ec;
     font-size: 0.8125rem;
   }
 
   .sidebar-select option {
-    background-color: var(--color-ink);
-    color: #e8edf5;
+    background-color: var(--color-plum);
+    color: #f3e7ec;
   }
 
   /* ---- Botoes ---- */
@@ -275,17 +313,36 @@
       opacity 120ms ease;
   }
 
+  /* O padding acima (0.875rem de cada lado = 28px) sobra num botao de texto e
+     ESTRANGULA um botao quadrado de icone: num alvo de 32px restam 2px de area
+     util, e o icone era espremido a um risco vertical — os "−/+" da comanda
+     apareciam como pontinhos.
+     A largura do utilitario (`w-3.5`) nao salvava sozinha porque o SVG e um
+     item flex e podia encolher abaixo dela. Duas garantias, entao: o padding do
+     `@layer base` cede para quem declara o proprio, e o icone nunca encolhe. */
+  button:where([class*='w-'][class*='h-'][class*='justify-center']) {
+    padding: 0;
+  }
+
+  button > svg,
+  .btn > svg {
+    flex: none;
+  }
+
   button:disabled,
   .btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
 
+  /* Texto VINHO sobre o dourado, nao branco: branco sobre #e0a63a da 2.2:1 e o
+     rotulo do botao mais importante da tela sumiria. Ver a nota nos tokens. */
   .btn-primary,
   button[type='submit'] {
     background-color: var(--color-brand);
     border-color: var(--color-brand);
-    color: #fff;
+    color: var(--color-brand-ink);
+    font-weight: 600;
   }
 
   .btn-primary:hover:not(:disabled),
@@ -297,11 +354,11 @@
   /* No cromo escuro o secundario e uma borda discreta... */
   .btn-secondary {
     background-color: transparent;
-    border-color: #2c3a4f;
-    color: #cfd8e5;
+    border-color: var(--color-plum-soft);
+    color: #e8d5dd;
   }
   .btn-secondary:hover:not(:disabled) {
-    background-color: var(--color-ink-soft);
+    background-color: var(--color-plum-soft);
   }
 
   /* ...e na area clara precisa de contraste proprio. */
@@ -534,7 +591,7 @@
   }
   .badge-info {
     background-color: var(--color-brand-soft);
-    color: var(--color-brand-strong);
+    color: var(--color-accent);
   }
 }
 
@@ -548,7 +605,7 @@
     color: var(--color-ink);
   }
   .text-accent {
-    color: var(--color-brand-strong);
+    color: var(--color-accent);
   }
   .text-success {
     color: var(--color-good);

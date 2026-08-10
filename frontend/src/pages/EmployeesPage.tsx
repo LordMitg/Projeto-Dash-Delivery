@@ -498,7 +498,7 @@ function EmployeeDialog({
             <legend className="sr-only">Permissões</legend>
             <div className="flex items-center justify-between gap-3">
               <p className="text-sm font-medium text-ink">O que esta pessoa pode fazer</p>
-              <span className="font-mono text-xs text-slate">
+              <span className="text-xs text-slate">
                 {selected.length} de {catalog.permissions.length}
               </span>
             </div>

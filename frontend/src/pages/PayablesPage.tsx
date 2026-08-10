@@ -172,7 +172,7 @@ function TotalsRow({ totals }: { totals: PayableTotals }) {
       {cards.map((c) => (
         <div key={c.label} className="flex flex-col gap-1 rounded-card border border-line bg-surface p-4">
           <p className="text-xs font-medium uppercase tracking-wide text-slate">{c.label}</p>
-          <p className={`font-mono text-xl font-semibold ${c.tone}`}>{c.value}</p>
+          <p className={`text-xl font-semibold ${c.tone}`}>{c.value}</p>
           <p className="text-xs text-slate">{c.hint}</p>
         </div>
       ))}
@@ -299,7 +299,7 @@ function NewPayableForm({
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               placeholder="0,00"
-              className="w-full bg-transparent font-mono text-sm text-ink outline-none"
+              className="w-full bg-transparent text-sm text-ink outline-none"
             />
           </div>
         </div>
@@ -313,7 +313,7 @@ function NewPayableForm({
             type="date"
             value={dueDate}
             onChange={(e) => setDueDate(e.target.value)}
-            className="rounded-md border border-line bg-canvas px-3 py-2 font-mono text-sm text-ink"
+            className="rounded-md border border-line bg-canvas px-3 py-2 text-sm text-ink"
           />
         </div>
 
@@ -326,7 +326,7 @@ function NewPayableForm({
             value={invoiceNumber}
             onChange={(e) => setInvoiceNumber(e.target.value)}
             placeholder="000123"
-            className="rounded-md border border-line bg-canvas px-3 py-2 font-mono text-sm text-ink"
+            className="rounded-md border border-line bg-canvas px-3 py-2 text-sm text-ink"
           />
         </div>
 
@@ -413,7 +413,7 @@ function PayForm({
               inputMode="decimal"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              className="w-full bg-transparent font-mono text-sm text-ink outline-none"
+              className="w-full bg-transparent text-sm text-ink outline-none"
             />
           </div>
         </div>
@@ -523,7 +523,7 @@ function PayableRow({
         </div>
 
         <div className="w-32">
-          <p className="font-mono text-sm text-ink">{shortDate(payable.dueDate)}</p>
+          <p className="text-sm text-ink">{shortDate(payable.dueDate)}</p>
           <p
             className={`text-xs ${
               payable.status === 'overdue' ? 'font-medium text-bad' : 'text-slate'
@@ -534,11 +534,11 @@ function PayableRow({
         </div>
 
         <div className="w-28 text-right">
-          <p className="font-mono text-sm font-semibold text-ink">
+          <p className="text-sm font-semibold text-ink">
             {brl(Number(payable.amount))}
           </p>
           {Number(payable.amountPaid) > 0 && !paid && (
-            <p className="font-mono text-xs text-slate">
+            <p className="text-xs text-slate">
               falta {brl(payable.remaining)}
             </p>
           )}

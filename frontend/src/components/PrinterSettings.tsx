@@ -81,7 +81,7 @@ export function PrinterSettings() {
                 className="mt-1 h-4 w-4 shrink-0 accent-brand"
               />
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span className="font-mono text-sm font-semibold text-ink">{opt.label}</span>
+                <span className="text-sm font-semibold text-ink">{opt.label}</span>
                 <span className="text-sm text-slate">{opt.hint}</span>
               </span>
               {active && (

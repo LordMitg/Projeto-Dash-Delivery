@@ -396,12 +396,32 @@ export function parseNfceHtml(html: string): {
   })
 
   // -- Total ---------------------------------------------------------------
+  // O total precisa ser escolhido pelo ROTULO, nunca pela posicao. Medido no
+  // HTML real da SEFAZ-BA, o primeiro `.totalNumb` da pagina e
+  // "Qtd. total de itens: 1" — pegar o primeiro fazia o total virar 1,00 numa
+  // nota de R$ 7,80. Errado e silencioso: a entrada de estoque gravaria um
+  // custo absurdo sem nenhum sinal de erro na tela.
   let valorTotal: number | null = null
-  $('#totalNota .totalNumb, .totalNumb, #linhaTotal .totalNumb').each((_i, el) => {
-    if (valorTotal !== null) return
-    const v = parseBrNumber(clean($(el).text()))
-    if (v > 0) valorTotal = v
+
+  // Rotulos que nao sao o total da nota. "Valor pago" e forma de pagamento e,
+  // em pagamento dividido, seria so uma parcela; desconto/frete/troco sao
+  // componentes; "qtd" e contagem de itens.
+  const NAO_E_TOTAL =
+    /qtd|quantidade|itens|desconto|frete|troco|acr[eé]scimo|tributo|valor\s+pago|forma\s+de\s+pagamento/i
+  const E_TOTAL = /valor\s+a\s+pagar|valor\s+total|total\s+da\s+nota|vl\.?\s*total/i
+
+  const totalCandidates: { label: string; value: number }[] = []
+  $('.totalNumb, #totalNota .totalNumb, #linhaTotal .totalNumb').each((_i, el) => {
+    const value = parseBrNumber(clean($(el).text()))
+    if (value <= 0) return
+    // O rotulo fica no irmao anterior; o texto do pai serve de rede de seguranca.
+    const label = clean($(el).prev().text()) || clean($(el).parent().text())
+    totalCandidates.push({ label, value })
   })
+
+  const explicit = totalCandidates.find((c) => E_TOTAL.test(c.label) && !NAO_E_TOTAL.test(c.label))
+  const fallback = totalCandidates.find((c) => !NAO_E_TOTAL.test(c.label))
+  valorTotal = explicit?.value ?? fallback?.value ?? null
 
   if (valorTotal === null && items.length > 0) {
     valorTotal = Number(items.reduce((acc, i) => acc + i.totalPrice, 0).toFixed(2))
@@ -438,14 +458,98 @@ interface SimpleResponse {
 }
 
 /**
- * GET com suporte a raiz ICP-Brasil.
+ * Saco de cookies simples (nome -> valor) usado dentro de uma consulta.
+ *
+ * Nao persiste entre chamadas de proposito: cada consulta comeca com sessao
+ * limpa, para que a sessao de uma nota nunca vaze para a de outra.
+ */
+type CookieJar = Map<string, string>
+
+/** Guarda os cookies de um `set-cookie`, ignorando os atributos (Path, HttpOnly...). */
+function storeCookies(jar: CookieJar, setCookie: string[] | undefined): void {
+  for (const raw of setCookie ?? []) {
+    const pair = raw.split(';')[0] ?? ''
+    const eq = pair.indexOf('=')
+    if (eq <= 0) continue
+    jar.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim())
+  }
+}
+
+/** Os bytes formam UTF-8 valido *e* usam ao menos uma sequencia multi-byte? */
+function isRealUtf8(buffer: Buffer): boolean {
+  // So-ASCII decodifica igual em qualquer um dos dois, entao nao serve de prova.
+  if (!buffer.some((b) => b >= 0x80)) return false
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(buffer)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Decodifica o corpo escolhendo o charset pelos BYTES, nao pela promessa.
+ *
+ * A pagina da SEFAZ-BA se contradiz — medido no HTML real:
+ *
+ *   header HTTP : text/html; charset=utf-8   <- verdade, os bytes sao utf-8
+ *   <meta>      : iso-8859-1                <- mentira, sobra de codigo antigo
+ *
+ * Ou seja, obedecer a declaracao as cegas corrompe: seguir a `<meta>` desta
+ * pagina transforma "Cartão" em "CartÃ£o". E a corrupcao nao para na estetica —
+ * ela quebra o regex de `emiss[aã]o` e a data volta `null`. Por isso o teste de
+ * UTF-8 real tem a palavra final sobre qualquer rotulo declarado: os bytes nao
+ * mentem, o cabecalho as vezes sim.
+ */
+function decodeBody(buffer: Buffer, contentType: string | undefined): string {
+  const asLatin1 = buffer.toString('latin1')
+
+  // O charset pode vir no header ou so na meta tag. Para ler a meta tag e
+  // preciso decodificar antes: latin1 serve porque nunca falha e preserva os
+  // bytes ASCII onde a declaracao esta escrita.
+  const fromHeader = /charset=["']?([\w-]+)/i.exec(contentType ?? '')?.[1]
+  const fromMeta =
+    /<meta[^>]+charset=["']?([\w-]+)/i.exec(asLatin1)?.[1] ??
+    /<meta[^>]+content=["'][^"']*charset=([\w-]+)/i.exec(asLatin1)?.[1]
+
+  const declared = (fromHeader ?? fromMeta ?? '').toLowerCase()
+  const isLatinFamily = /^(iso-?8859-?1|latin1|windows-1252|ansi)$/.test(declared)
+
+  // Bytes sao utf-8 de verdade: decodifica utf8 mesmo que a pagina jure latin1.
+  if (isRealUtf8(buffer)) return buffer.toString('utf8')
+
+  // Nao sao utf-8 valido. Se a pagina prometeu utf8, a promessa era falsa —
+  // latin1 e o palpite certo para os portais ASP.NET antigos.
+  if (!declared || isLatinFamily || /^utf-?8$/.test(declared)) return asLatin1
+
+  // Charset exotico declarado: tenta o TextDecoder e cai no latin1 se o Node
+  // nao tiver a tabela compilada.
+  try {
+    return new TextDecoder(declared).decode(buffer)
+  } catch {
+    return asLatin1
+  }
+}
+
+/**
+ * GET com suporte a raiz ICP-Brasil, seguindo redirects **com** os cookies.
  *
  * Usa `https.request` em vez de `fetch` por um motivo pratico: o `fetch` do
  * Node nao aceita um agente TLS customizado sem depender do `undici` como
  * dependencia direta, e adicionar um pacote inteiro para configurar uma CA
  * seria peso desnecessario.
+ *
+ * Carregar o `jar` entre os hops nao e detalhe: o portal da SEFAZ-BA abre uma
+ * sessao (`ASP.NET_SessionId`) no primeiro 302 e e nela que fica o resultado
+ * liberado pelo hash do QR. Seguindo o redirect sem devolver o cookie, o portal
+ * ve um visitante novo, esquece a consulta e responde o formulario com captcha.
+ * Era exatamente esse o "captcha obrigatorio" que travava a importacao.
  */
-function httpGet(rawUrl: string, redirectsLeft = MAX_REDIRECTS): Promise<SimpleResponse> {
+function httpGet(
+  rawUrl: string,
+  redirectsLeft = MAX_REDIRECTS,
+  jar: CookieJar = new Map(),
+): Promise<SimpleResponse> {
   return new Promise((resolve, reject) => {
     let url: URL
     try {
@@ -457,6 +561,8 @@ function httpGet(rawUrl: string, redirectsLeft = MAX_REDIRECTS): Promise<SimpleR
 
     const isHttps = url.protocol === 'https:'
     const client = isHttps ? https : http
+
+    const cookieHeader = [...jar].map(([name, value]) => `${name}=${value}`).join('; ')
 
     const request = client.request(
       url,
@@ -470,6 +576,7 @@ function httpGet(rawUrl: string, redirectsLeft = MAX_REDIRECTS): Promise<SimpleR
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
           'Accept-Language': 'pt-BR,pt;q=0.9',
           Accept: 'text/html,application/xhtml+xml',
+          ...(cookieHeader ? { Cookie: cookieHeader } : {}),
         },
         timeout: FETCH_TIMEOUT_MS,
       },
@@ -477,18 +584,23 @@ function httpGet(rawUrl: string, redirectsLeft = MAX_REDIRECTS): Promise<SimpleR
         const status = response.statusCode ?? 0
         const location = response.headers.location
 
+        storeCookies(jar, response.headers['set-cookie'])
+
         // Varios portais respondem 302 para uma pagina intermediaria antes de
         // mostrar a nota; sem seguir, o parser receberia HTML vazio.
         if (status >= 300 && status < 400 && location && redirectsLeft > 0) {
           response.resume()
-          resolve(httpGet(new URL(location, url).toString(), redirectsLeft - 1))
+          resolve(httpGet(new URL(location, url).toString(), redirectsLeft - 1, jar))
           return
         }
 
         const chunks: Buffer[] = []
         response.on('data', (chunk: Buffer) => chunks.push(chunk))
         response.on('end', () =>
-          resolve({ status, body: Buffer.concat(chunks).toString('utf8') }),
+          resolve({
+            status,
+            body: decodeBody(Buffer.concat(chunks), response.headers['content-type']),
+          }),
         )
       },
     )

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useTenant } from '../context/TenantContext';
 import { apiGet, apiPost, errorMessage } from '../lib/api';
+import { ImageUploadField } from './ImageUploadField';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -50,6 +51,8 @@ interface ProductForm {
   category: string;
   productType: 'simple' | 'combo';
   description: string;
+  /** Caminho da foto no servidor. A grade do PDV usa este campo. */
+  imageUrl: string;
 }
 
 const EMPTY_FORM: ProductForm = {
@@ -60,6 +63,7 @@ const EMPTY_FORM: ProductForm = {
   category: '',
   productType: 'simple',
   description: '',
+  imageUrl: '',
 };
 
 /**
@@ -246,6 +250,16 @@ export default function TechnicalSheet() {
       <section style={{ marginBottom: '1.5rem' }}>
         <h3>1. Dados do Produto</h3>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+          {/* A foto ocupa a linha inteira: e o unico campo com area visual, e
+              dividir a coluna com um input de texto deixaria a
+              pre-visualizacao apertada. */}
+          <div style={{ gridColumn: '1 / -1', marginBottom: '0.5rem' }}>
+            <ImageUploadField
+              label="Foto do produto"
+              value={form.imageUrl}
+              onChange={(url) => setForm((p) => ({ ...p, imageUrl: url }))}
+            />
+          </div>
           <label>
             Nome *
             <input

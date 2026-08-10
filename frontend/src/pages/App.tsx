@@ -1,30 +1,9 @@
 import { Suspense, lazy, useState } from 'react'
-import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
-import {
-  BarChart3,
-  Calculator,
-  ChefHat,
-  FileText,
-  Landmark,
-  LayoutDashboard,
-  Loader2,
-  LogOut,
-  MapPin,
-  Menu,
-  Package,
-  Printer,
-  Receipt,
-  ScanLine,
-  ShieldOff,
-  ShoppingCart,
-  Store,
-  Tags,
-  Users,
-  Wallet,
-  X,
-} from 'lucide-react'
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { Loader2, Menu, ShieldOff } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { AuthGate } from './AuthGate'
+import { SideNav } from '../components/SideNav'
 import { StoreStatusBadge } from '../components/StoreStatusBadge'
 import { TenantSwitcher } from '../components/TenantSwitcher'
 
@@ -48,8 +27,8 @@ const PDV = lazy(() => import('../components/PDV').then((m) => ({ default: m.PDV
 const KitchenDisplay = lazy(() =>
   import('../components/KitchenDisplay').then((m) => ({ default: m.KitchenDisplay })),
 )
-const BarcodeScanner = lazy(() =>
-  import('../components/BarcodeScanner').then((m) => ({ default: m.BarcodeScanner })),
+const ScannerScreen = lazy(() =>
+  import('../components/scanner/ScannerScreen').then((m) => ({ default: m.ScannerScreen })),
 )
 const PrinterSettings = lazy(() =>
   import('../components/PrinterSettings').then((m) => ({ default: m.PrinterSettings })),
@@ -89,84 +68,6 @@ function NoAccess() {
   )
 }
 
-interface NavItem {
-  to: string
-  label: string
-  icon: typeof LayoutDashboard
-  /**
-   * Permissao exigida para o item aparecer. A chave e a MESMA que o backend
-   * cobra na rota correspondente.
-   *
-   * Antes existia uma flag `financial` que agrupava tudo que envolvia dinheiro.
-   * Ela nao servia mais: o dono agora libera permissao por permissao, e um caixa
-   * autorizado a consultar preco (`pricing:view`) sem ver faturamento
-   * (`reports:view`) era impossivel de representar com um booleano so.
-   */
-  permission?: string
-  /**
-   * Alternativa a `permission` quando a tela e liberada por mais de uma chave.
-   *
-   * O caixa e o caso: o servidor monta `/api/cash` com
-   * `requirePermission('cash:operate', 'cash:close', 'pdv:use')` — quem so opera
-   * o PDV precisa consultar o turno para saber se pode vender, mesmo sem poder
-   * abrir ou fechar. Com um `permission` unico o item sumiria para o operador e
-   * o link que o proprio PDV oferece cairia no vazio.
-   */
-  anyPermission?: string[]
-  /** Exclusivo do dono: gestao de equipe e perfil da loja nao sao delegaveis. */
-  ownerOnly?: boolean
-}
-
-/** Operacao primeiro: o PDV e a primeira coisa que a cozinha procura. */
-const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
-  {
-    title: 'Operação',
-    items: [
-      { to: '/pdv', label: 'PDV', icon: ShoppingCart, permission: 'pdv:use' },
-      {
-        to: '/caixa',
-        label: 'Caixa',
-        icon: Wallet,
-        anyPermission: ['cash:operate', 'cash:close', 'pdv:use'],
-      },
-      { to: '/cozinha', label: 'Cozinha', icon: ChefHat, permission: 'kitchen:view' },
-      { to: '/scanner', label: 'Scanner', icon: ScanLine, permission: 'scanner:use' },
-    ],
-  },
-  {
-    title: 'Cadastro',
-    items: [
-      { to: '/insumos', label: 'Insumos', icon: Package, permission: 'ingredients:view' },
-      { to: '/fichas', label: 'Fichas técnicas', icon: FileText, permission: 'products:view' },
-      { to: '/notas', label: 'Notas fiscais', icon: Receipt, permission: 'invoices:manage' },
-    ],
-  },
-  {
-    title: 'Gestão',
-    items: [
-      { to: '/', label: 'Visão geral', icon: BarChart3, permission: 'reports:view' },
-      { to: '/indicadores', label: 'Indicadores', icon: LayoutDashboard, permission: 'reports:view' },
-      {
-        to: '/contas',
-        label: 'Contas a pagar',
-        icon: Landmark,
-        anyPermission: ['payables:view', 'payables:manage'],
-      },
-      { to: '/precos', label: 'Preços', icon: Tags, permission: 'pricing:view' },
-      { to: '/simulador', label: 'Simulador', icon: Calculator, permission: 'pricing:view' },
-    ],
-  },
-  {
-    title: 'Ajustes',
-    items: [
-      { to: '/negocio', label: 'Meu negócio', icon: Store, ownerOnly: true },
-      { to: '/equipe', label: 'Funcionários', icon: Users, ownerOnly: true },
-      { to: '/entrega', label: 'Bairros e taxas', icon: MapPin, permission: 'delivery:manage' },
-      { to: '/configuracoes', label: 'Impressora', icon: Printer, permission: 'printer:manage' },
-    ],
-  },
-]
-
 export function App() {
   const { isAuthenticated, loading, user, logout, can, isOwner } = useAuth()
   const [navOpen, setNavOpen] = useState(false)
@@ -189,13 +90,6 @@ export function App() {
   // requisicoes que voltariam 401.
   if (!isAuthenticated) return <AuthGate />
 
-  const initials = `${user?.firstName?.[0] ?? ''}${user?.lastName?.[0] ?? ''}`.toUpperCase()
-  // Existem exatamente dois papeis por vinculo: `owner` e `staff`. Os rotulos
-  // antigos ("Administrador", "Gerente") vinham do modelo anterior, em que o
-  // cargo definia o acesso — hoje quem define e a lista de permissoes, e exibir
-  // "Gerente" sugeriria um poder que o cargo nao carrega mais.
-  const roleLabel = isOwner ? 'Dono do negócio' : 'Funcionário'
-
   /**
    * Para onde mandar quem digita uma URL inexistente.
    *
@@ -208,12 +102,48 @@ export function App() {
    * funcionario recem-criado, ainda sem nenhuma caixa marcada, precisa de UMA
    * rota valida para onde ir.
    */
-  // O PDV roda FORA do shell: sem menu lateral, sem cabecalho, ocupando a tela
-  // inteira. Numa frente de caixa cada pixel conta, e os 256px do menu custavam
-  // uma coluna inteira de produtos. A propria tela oferece o botao de voltar.
+  /**
+   * O PDV tem um shell PROPRIO: menu presente, porem recolhido.
+   *
+   * Antes ele rodava totalmente fora do shell, em tela cheia. O motivo era
+   * legitimo — os 256px do menu custavam uma coluna inteira de produtos — mas a
+   * cura tinha efeito colateral: a frente de caixa virava um comodo sem porta, e
+   * ir para "Cozinha" ou "Caixa" dependia de o operador achar um botao de voltar.
+   *
+   * O trilho recolhido (~68px) devolve quase todo aquele espaco e mantem a
+   * navegacao a um clique. O cabecalho continua ausente: a barra do proprio PDV
+   * ja carrega loja, operador e estado do caixa, e empilhar duas barras comeria
+   * a altura que a grade precisa. `h-screen` + `overflow-hidden` porque o PDV
+   * rola por dentro (grade e comanda), nunca a pagina toda.
+   */
   if (isPdvRoute) {
     if (!can('pdv:use')) return <Navigate to="/sem-acesso" replace />
-    return <PDV />
+    return (
+      <div className="flex h-screen overflow-hidden bg-canvas">
+        {/* `key` distinta da do shell de gestao: sem ela o React reaproveita a
+            MESMA instancia de SideNav ao trocar de rota (mesma posicao na
+            arvore), e o `useState(defaultCollapsed)` — que so roda na montagem —
+            nunca reavalia. Na pratica o menu chegava expandido no PDV. */}
+        <SideNav
+          key="pdv"
+          defaultCollapsed
+          mobileOpen={navOpen}
+          onMobileClose={() => setNavOpen(false)}
+        />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <Suspense
+            fallback={
+              <div className="flex flex-1 items-center justify-center gap-2 text-sm text-slate">
+                <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+                Abrindo o PDV...
+              </div>
+            }
+          >
+            <PDV onOpenMenu={() => setNavOpen(true)} />
+          </Suspense>
+        </div>
+      </div>
+    )
   }
 
   const homePath = can('reports:view')
@@ -228,108 +158,12 @@ export function App() {
 
   return (
     <div className="flex min-h-screen bg-canvas">
-      {navOpen && (
-        <button
-          type="button"
-          aria-label="Fechar menu"
-          onClick={() => setNavOpen(false)}
-          className="fixed inset-0 z-30 bg-ink/50 lg:hidden"
-        />
-      )}
-
-      <nav
-        aria-label="Navegação principal"
-        className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col bg-ink transition-transform lg:static lg:translate-x-0 ${
-          navOpen ? 'translate-x-0' : '-translate-x-full'
-        }`}
-      >
-        <div className="flex items-center justify-between gap-3 px-5 py-5">
-          <div className="flex items-center gap-2.5">
-            <span
-              aria-hidden="true"
-              className="flex h-8 w-8 items-center justify-center rounded-md bg-brand font-mono text-sm font-bold text-white"
-            >
-              D
-            </span>
-            <span className="text-sm font-semibold tracking-wide text-white">
-              Delivery ERP
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setNavOpen(false)}
-            aria-label="Fechar menu"
-            className="text-white/60 hover:text-white lg:hidden"
-          >
-            <X aria-hidden="true" className="h-5 w-5" />
-          </button>
-        </div>
-
-        <div className="px-5 pb-4">
-          <StoreStatusBadge />
-        </div>
-
-        <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-3 pb-4">
-          {NAV_GROUPS.map((group) => {
-            const items = group.items.filter(
-              (i) =>
-                (i.ownerOnly ? isOwner : true) &&
-                (!i.permission || can(i.permission)) &&
-                (!i.anyPermission || i.anyPermission.some((p) => can(p))),
-            )
-            if (items.length === 0) return null
-            return (
-              <div key={group.title} className="flex flex-col gap-1">
-                <p className="px-2 pb-1 text-[0.6875rem] font-semibold tracking-[0.14em] text-white/40 uppercase">
-                  {group.title}
-                </p>
-                {items.map(({ to, label, icon: Icon }) => (
-                  <NavLink
-                    key={to}
-                    to={to}
-                    end={to === '/'}
-                    onClick={() => setNavOpen(false)}
-                    className={({ isActive }) =>
-                      `flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors ${
-                        isActive
-                          ? 'bg-brand font-medium text-white'
-                          : 'text-white/65 hover:bg-ink-soft hover:text-white'
-                      }`
-                    }
-                  >
-                    <Icon aria-hidden="true" className="h-4 w-4 shrink-0" />
-                    {label}
-                  </NavLink>
-                ))}
-              </div>
-            )
-          })}
-        </div>
-
-        <div className="flex items-center gap-3 border-t border-white/10 px-4 py-4">
-          <span
-            aria-hidden="true"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ink-soft text-xs font-semibold text-white"
-          >
-            {initials || '--'}
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-white">
-              {user?.firstName} {user?.lastName}
-            </p>
-            <p className="truncate text-xs text-white/50">{roleLabel}</p>
-          </div>
-          <button
-            type="button"
-            onClick={logout}
-            aria-label="Sair"
-            title="Sair"
-            className="text-white/50 transition-colors hover:text-white"
-          >
-            <LogOut aria-hidden="true" className="h-4 w-4" />
-          </button>
-        </div>
-      </nav>
+      <SideNav
+        key="gestao"
+        mobileOpen={navOpen}
+        onMobileClose={() => setNavOpen(false)}
+        header={<StoreStatusBadge />}
+      />
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-3 border-b border-line bg-surface px-4 py-3 lg:px-8">
@@ -367,7 +201,13 @@ export function App() {
               {/* Antes apontava para <PDV />: a cozinha abria o caixa em vez da
                   fila de producao, e o Kanban nunca existiu de fato. */}
               {can('kitchen:view') && <Route path="/cozinha" element={<KitchenDisplay />} />}
-              {can('scanner:use') && <Route path="/scanner" element={<BarcodeScanner />} />}
+              {/* Duas chaves porque o servidor monta `/api/scanner` com
+                  `requirePermission('scanner:use', 'ingredients:manage')`. Quem
+                  gerencia insumos mas nao tinha `scanner:use` ficava sem a tela,
+                  apesar de o backend aceitar as requisicoes dele. */}
+              {(can('scanner:use') || can('ingredients:manage')) && (
+                <Route path="/scanner" element={<ScannerScreen />} />
+              )}
               {can('ingredients:view') && (
                 <Route path="/insumos" element={<IngredientsManagement />} />
               )}
