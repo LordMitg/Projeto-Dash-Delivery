@@ -66,6 +66,18 @@ export default defineConfig(async () => {
 
   return {
     plugins,
+    resolve: {
+      /**
+       * TypeScript ANTES de JavaScript.
+       *
+       * O padrao do Vite e ['.mjs', '.js', '.mts', '.ts', '.jsx', '.tsx']: com
+       * '.js' na frente, um `App.js` esquecido ao lado de `App.tsx` era o que o
+       * import sem extensao carregava. O build continuava verde e as alteracoes
+       * no .tsx simplesmente nao apareciam — o tipo de falha que custa horas
+       * porque nada acusa. Aqui o fonte sempre ganha do artefato.
+       */
+      extensions: ['.mts', '.ts', '.tsx', '.mjs', '.js', '.jsx', '.json'],
+    },
     server: {
       // 3000 e a porta que o preview procura. `strictPort` evita o Vite pular
       // para 5174/5175 quando a 3000 esta ocupada: se pular, o preview aponta

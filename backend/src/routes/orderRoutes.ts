@@ -30,12 +30,16 @@ import {
 } from '../lib/http.js'
 import { validate, z, idParam, money, positiveInt } from '../lib/validate.js'
 import { applyStockDeduction, restoreStock, type StockConsumption } from '../services/stockService.js'
+import { findOpenRegister, recordSaleInCash } from '../services/cashService.js'
 import { emitToTenant } from '../lib/realtime.js'
 import { env } from '../config/env.js'
 
 const router = Router()
 
 const dec = (v: number) => new Prisma.Decimal(v.toFixed(2))
+
+/** Arredonda para centavos, evitando o residuo de ponto flutuante nas somas. */
+const round2 = (v: number) => Math.round(v * 100) / 100
 
 /** Fluxo de status permitido no Kanban da cozinha. */
 const ORDER_STATUSES = [
@@ -235,6 +239,25 @@ const createOrderSchema = z.object({
     .nullish(),
   orderType: z.enum(['delivery', 'balcao', 'mesa']).default('delivery'),
   paymentMethod: z.enum(['cash', 'credit', 'debit', 'pix', 'voucher', 'fiado']).default('cash'),
+  /**
+   * Pagamento misto: uma entrada por forma usada na venda.
+   *
+   * Opcional para nao quebrar quem ainda envia so `paymentMethod` (o cardapio
+   * publico, por exemplo). Quando vem preenchido, a soma tem de fechar com o
+   * total calculado no servidor — ver a validacao na etapa 5.
+   */
+  payments: z
+    .array(
+      z.object({
+        method: z.enum(['cash', 'credit', 'debit', 'pix', 'voucher', 'fiado']),
+        amount: money.refine((v) => v > 0, 'Cada pagamento deve ser maior que zero'),
+        /** Nota entregue pelo cliente nesta parcela em especie. */
+        changeFor: money.nullish(),
+        cardBrand: z.string().trim().max(40).nullish(),
+      }),
+    )
+    .max(6, 'No maximo 6 formas de pagamento por venda')
+    .optional(),
   /** Bairro para calcular a taxa de entrega. */
   deliveryZone: z.string().trim().nullish(),
   discount: money.default(0),
@@ -420,16 +443,88 @@ router.post(
 
     if (totalAmount < 0) throw badRequest('O desconto nao pode ser maior que o total do pedido')
 
-    // ---- 5. Troco -------------------------------------------------------
+    // ---- 5. Pagamentos e troco ------------------------------------------
+    // Normaliza os dois formatos aceitos numa lista unica de parcelas. Assim o
+    // resto da rota (troco, caixa, `paymentMethod` principal) tem um so caminho
+    // de codigo, em vez de um `if` a cada uso.
+    const rawPayments =
+      body.payments && body.payments.length > 0
+        ? body.payments
+        : [
+            {
+              method: body.paymentMethod,
+              amount: totalAmount,
+              changeFor: body.changeFor ?? null,
+              cardBrand: null,
+            },
+          ]
+
+    // A soma tem de fechar com o total do SERVIDOR. Sem isto, um cliente
+    // adulterado enviaria R$ 5 de pagamento para um pedido de R$ 80 e a venda
+    // entraria como paga.
+    const paidSum = round2(rawPayments.reduce((s, p) => s + p.amount, 0))
+    if (Math.abs(paidSum - round2(totalAmount)) > 0.01) {
+      throw badRequest(
+        `A soma dos pagamentos (R$ ${paidSum.toFixed(2)}) nao fecha com o total ` +
+          `do pedido (R$ ${round2(totalAmount).toFixed(2)}).`,
+      )
+    }
+
+    // Duas parcelas em dinheiro na mesma venda nao existem na pratica e
+    // tornariam o troco ambiguo (qual das duas gerou o troco?).
+    if (rawPayments.filter((p) => p.method === 'cash').length > 1) {
+      throw badRequest('Use uma unica parcela em dinheiro por venda.')
+    }
+
     let changeAmount: number | null = null
-    if (body.paymentMethod === 'cash' && body.changeFor != null) {
-      if (body.changeFor < totalAmount) {
-        throw badRequest(
-          `O valor em dinheiro (R$ ${body.changeFor.toFixed(2)}) e menor que o total ` +
-            `(R$ ${totalAmount.toFixed(2)}).`,
-        )
+    let changeFor: number | null = null
+
+    const paymentsData = rawPayments.map((p) => {
+      let lineChangeFor: number | null = null
+      let lineChange: number | null = null
+
+      if (p.method === 'cash' && p.changeFor != null) {
+        // Compara com o valor DESTA parcela, nao com o total: numa venda mista
+        // de R$ 80 com R$ 30 em dinheiro, exigir R$ 80 em especie estaria errado.
+        if (p.changeFor < p.amount) {
+          throw badRequest(
+            `O valor em dinheiro (R$ ${p.changeFor.toFixed(2)}) e menor que a parte ` +
+              `paga em especie (R$ ${p.amount.toFixed(2)}).`,
+          )
+        }
+        lineChangeFor = p.changeFor
+        lineChange = round2(p.changeFor - p.amount)
+        changeFor = lineChangeFor
+        changeAmount = lineChange
       }
-      changeAmount = body.changeFor - totalAmount
+
+      return {
+        method: p.method,
+        amount: dec(p.amount),
+        changeFor: lineChangeFor != null ? dec(lineChangeFor) : null,
+        changeAmount: lineChange != null ? dec(lineChange) : null,
+        cardBrand: p.cardBrand ?? null,
+      }
+    })
+
+    // Forma principal = a de maior valor. E o que os relatorios antigos leem em
+    // `Order.paymentMethod`; o detalhe fica em `payments`.
+    const primaryMethod = rawPayments.reduce((a, b) => (b.amount > a.amount ? b : a)).method
+
+    // Fiado nao entra como pago: virou divida do cliente. Se qualquer parcela
+    // for fiado, a venda fica pendente ate a quitacao.
+    const hasFiado = rawPayments.some((p) => p.method === 'fiado')
+
+    // ---- 5b. Caixa aberto e obrigatorio ---------------------------------
+    // Regra do negocio: toda venda pertence a um turno identificado. Sem isto o
+    // fechamento nao teria com o que comparar a gaveta, e a conferencia seria
+    // decorativa.
+    const openRegister = await findOpenRegister(prisma, tenantId)
+    if (!openRegister) {
+      throw conflict(
+        'O caixa esta fechado. Abra o caixa para comecar a registrar vendas.',
+        'CASH_CLOSED',
+      )
     }
 
     // ---- 6. Canal de venda ---------------------------------------------
@@ -497,21 +592,35 @@ router.post(
           deliveryFee: dec(deliveryFee),
           discount: dec(discount),
           totalAmount: dec(totalAmount),
-          changeFor: body.changeFor != null ? dec(body.changeFor) : null,
+          changeFor: changeFor != null ? dec(changeFor) : null,
           changeAmount: changeAmount != null ? dec(changeAmount) : null,
-          paymentMethod: body.paymentMethod,
-          paymentStatus: body.paymentMethod === 'fiado' ? 'pending' : 'paid',
+          paymentMethod: primaryMethod,
+          paymentStatus: hasFiado ? 'pending' : 'paid',
           observations: body.observations ?? null,
           tenantId,
           createdById: auth.userId,
           customerId,
           salesChannelId: channelId,
+          cashRegisterId: openRegister.id,
           orderItems: { create: orderItemsData },
+          payments: { create: paymentsData },
         },
         include: {
           orderItems: { include: { product: { select: { id: true, name: true } } } },
           customer: true,
+          payments: true,
         },
+      })
+
+      // 7c-bis. Lancamento no caixa, uma linha por forma de pagamento.
+      // Dentro da MESMA transacao do pedido: se o caixa falhasse depois, a venda
+      // existiria sem entrada no turno e o fechamento acusaria falta de dinheiro.
+      await recordSaleInCash(tx, {
+        registerId: openRegister.id,
+        orderId: createdOrder.id,
+        orderNumber: createdOrder.orderNumber,
+        userId: auth.userId,
+        payments: rawPayments.map((p) => ({ method: p.method, amount: p.amount })),
       })
 
       // 7d. LTV do cliente

@@ -145,6 +145,28 @@ export function unwrap<T>(payload: Envelope<T> | T): T {
   ) {
     return (payload as Envelope<T>).data
   }
+
+  /**
+   * Envelope sem o campo `success`.
+   *
+   * As rotas de precificacao respondem apenas `{ data: [...] }`. A checagem
+   * acima exigia `success` e `data` juntos, entao devolvia o envelope inteiro
+   * no lugar da lista — o componente recebia um objeto onde esperava array e
+   * quebrava com "rules is not iterable".
+   *
+   * O teste por chave unica evita falso positivo: uma entidade real trazida da
+   * API tem outros campos (`id`, `name`), nunca so `data`.
+   */
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    !Array.isArray(payload) &&
+    Object.keys(payload).length === 1 &&
+    'data' in payload
+  ) {
+    return (payload as { data: T }).data
+  }
+
   return payload as T
 }
 

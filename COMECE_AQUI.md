@@ -1,157 +1,207 @@
-# 🚀 COMECE AQUI - Dash Delivery ERP
+# COMECE AQUI — Dash Delivery ERP
 
-## Guia Rápido para Iniciar
-
-### ⚡ Início em 30 Segundos
-
-```
-1. Abra iniciar_sistema.bat (duplo clique)
-   Na primeira vez: direito do mouse → "Executar como Administrador"
-
-2. Aguarde ~10-30 segundos
-
-3. 2 janelas abrirão automaticamente:
-   • Terminal 1: Backend Express (porta 3001)
-   • Terminal 2: Electron Frontend
-
-4. Dashboard do ERP estará pronto para usar!
-```
+Sistema de ERP/PDV para delivery. Roda **no seu PC**, como um servidor local,
+e você acessa **pelo navegador** (não é aplicativo instalado).
 
 ---
 
-## 📋 Pré-Requisitos
+## Pré-requisitos (instalar uma vez)
 
-- ✅ PostgreSQL 12+ instalado e rodando
-- ✅ Node.js 18+
-- ✅ npm 9+
-- ✅ Arquivo `backend/.env` configurado
+| O quê | Versão | Onde |
+|---|---|---|
+| **Node.js** | 20.11 ou maior | https://nodejs.org (baixe a versão **LTS**) |
+| **PostgreSQL** | 12 ou maior | https://www.postgresql.org/download/windows/ |
 
-### Configurar .env (primeira vez)
+Ao instalar o PostgreSQL ele pede uma **senha para o usuário `postgres`**.
+Anote essa senha: você vai precisar dela no passo 2.
+
+Não é preciso criar o banco de dados na mão — o sistema cria sozinho.
+
+---
+
+## Início rápido (Windows)
+
+### 1. Dê um duplo clique em `iniciar_sistema.bat`
+
+Ele faz tudo: instala as dependências, cria o `backend/.env`, prepara o banco,
+sobe os servidores e abre o navegador.
+
+Não precisa de "Executar como Administrador".
+
+### 2. Confirme a senha do PostgreSQL
+
+Na **primeira** execução o script cria o arquivo `backend/.env` e pausa para
+você conferir. Abra `backend/.env` e ajuste a linha:
+
+```
+DATABASE_URL="postgresql://postgres:SUA_SENHA@localhost:5432/delivery_erp?schema=public"
+```
+
+Troque `SUA_SENHA` pela senha que você definiu ao instalar o PostgreSQL.
+Se a sua senha for literalmente `postgres`, não precisa mudar nada.
+
+Salve o arquivo e volte à janela do script para continuar.
+
+### 3. Entre no sistema
+
+O navegador abre em **http://localhost:3000** com a tela de login:
+
+```
+e-mail: admin@local
+senha:  admin123
+```
+
+Trocar essa senha é o primeiro passo recomendado depois de entrar.
+
+---
+
+## Início pelo terminal (Windows, Linux ou macOS)
+
+Se preferir não usar o `.bat`:
 
 ```bash
-# Copiar e editar
+# 1. copie o arquivo de configuração e ajuste a senha do Postgres
 cp backend/.env.example backend/.env
 
-# Editar backend/.env com suas credenciais
-DATABASE_URL="postgresql://postgres:YOUR_PASSWORD@localhost:5432/delivery_erp"
-JWT_SECRET="seu-valor-secreto-aleatorio"
+# 2. instale, prepare o banco e crie o usuário de acesso
+pnpm init:app
+
+# 3. suba backend e frontend juntos
+pnpm dev
 ```
+
+Se o `pnpm` não estiver disponível, habilite com `corepack enable`.
+
+Acesse http://localhost:3000.
 
 ---
 
-## 📁 Estrutura
+## O que sobe
+
+| Serviço | Endereço | O que é |
+|---|---|---|
+| Frontend | http://localhost:3000 | A interface (React + Vite) |
+| Backend | http://localhost:3001 | A API (Express + Prisma) |
+| Banco | localhost:5432 | PostgreSQL |
+
+As duas portas precisam estar livres. A do frontend é fixa (`strictPort`):
+se a 3000 estiver ocupada, o Vite falha em vez de trocar de porta —
+e trocar de porta quebraria o CORS do backend.
+
+---
+
+## Comandos úteis
+
+| Comando | O que faz |
+|---|---|
+| `pnpm dev` | Sobe backend e frontend juntos |
+| `pnpm dev:api` | Só o backend |
+| `pnpm dev:web` | Só o frontend |
+| `pnpm init:app` | Instala tudo, aplica migrations e roda o seed |
+| `pnpm db:deploy` | Aplica as migrations pendentes |
+| `pnpm db:seed` | Recria o usuário de acesso e os dados de exemplo |
+| `pnpm db:studio` | Abre o Prisma Studio para inspecionar o banco |
+| `pnpm typecheck` | Confere os tipos (não gera arquivos) |
+
+O `db:seed` usa *upsert*: rodar de novo **não apaga** seus pedidos e cadastros.
+
+`pnpm db:reset` **apaga o banco inteiro**. Use apenas se quiser começar do zero.
+
+---
+
+## Estrutura
 
 ```
 projeto-dash-delivery/
-├── iniciar_sistema.bat          ← Clique aqui para iniciar
-├── INICIALIZACAO.md             ← Instruções completas
-├── COMECE_AQUI.md               ← Este arquivo
-├── ETAPA_BONUS_RESUMO.txt       ← Resumo técnico
-├── CHECKPOINT_ETAPA_6.md        ← Documentação do projeto
+├── iniciar_sistema.bat      <- duplo clique para iniciar (Windows)
+├── COMECE_AQUI.md           <- este arquivo
 │
-├── backend/
-│   ├── .env                     ← Configure aqui (primeiro uso)
-│   ├── .env.example             ← Template
-│   ├── prisma/schema.prisma     ← Schema BD
-│   └── src/                     ← APIs (Express + Prisma)
+├── backend/                 API Express + Prisma
+│   ├── .env                 <- suas configurações (criado no 1o uso)
+│   ├── .env.example         <- modelo
+│   ├── prisma/
+│   │   ├── schema.prisma    <- schema do banco
+│   │   ├── migrations/      <- histórico de alterações do banco
+│   │   └── seed.ts          <- dados iniciais
+│   └── src/
+│       ├── routes/          <- endpoints da API
+│       └── middleware/      <- autenticação e permissões
 │
-└── frontend/
-    ├── src/
-    │   ├── index.css            ← Tema Enterprise
-    │   └── components/          ← Componentes React
-    └── index.html
+└── frontend/                React + Vite
+    └── src/
+        ├── pages/           <- telas
+        ├── components/      <- componentes
+        └── contexts/        <- sessão e negócio ativo
 ```
 
 ---
 
-## ✅ Após Iniciar
+## Problemas comuns
 
-### Backend Rodando
-```
-URL:    http://localhost:3001
-APIs:   /api/ingredients, /api/products, /api/orders, etc.
-BD:     PostgreSQL sincronizado
-```
+### A tela abre, mas fica vazia / nada carrega
 
-### Frontend Aberto
+Quase sempre é **CORS**: o `CORS_ORIGINS` do `backend/.env` precisa incluir a
+porta em que o frontend roda (**3000**). Abra o console do navegador com `F12`
+e veja se há erro de CORS. O valor correto é:
+
 ```
-Aplicação:  Electron + React
-Dashboard:  KPIs em tempo real
-Operações:  PDV, Precificação, NF-e, Relatórios
+CORS_ORIGINS="https://localhost:3000,http://localhost:3000"
 ```
 
----
+### `Environment variable not found: DATABASE_URL`
 
-## 🎯 Próximos Passos
+O arquivo `backend/.env` não existe. Crie com:
 
-1. **Criar Primeira Empresa (Tenant)**
-   - No dashboard → Sidebar → Selecionar/Criar empresa
+```bash
+cp backend/.env.example backend/.env
+```
 
-2. **Testar PDV**
-   - Adicionar insumos → Produtos → Fazer pedido
+### `Can't reach database server at localhost:5432`
 
-3. **Importar Nota Fiscal**
-   - NF-e → Upload XML → Mapear itens
+O PostgreSQL não está rodando, ou a senha no `.env` está errada.
 
-4. **Usar Simulador**
-   - Prever impacto de contratações e novos veículos
+- Windows: `Win+R` → `services.msc` → procure por **postgresql** → Iniciar
+- Confirme a senha na linha `DATABASE_URL` do `backend/.env`
 
----
+### Não consigo fazer login
 
-## ⚡ Atalhos
+Nenhum usuário foi criado. Rode:
 
-| Tecla | Ação |
-|-------|------|
-| `Ctrl + C` | Para servidor |
-| `F12` / `Ctrl+Shift+I` | DevTools (Electron) |
-| `Ctrl + R` | Recarrega interface |
+```bash
+pnpm db:seed
+```
 
----
+E entre com `admin@local` / `admin123`.
 
-## 🐛 Problemas?
+### `Port 3000 is already in use`
 
-### Erro: Acesso Negado
-→ Execute como Administrador (primeira vez)
+Outro programa está usando a porta. Feche-o, ou descubra qual é:
 
-### Erro: PostgreSQL não conecta
-→ Inicie PostgreSQL (Services do Windows)
+```
+netstat -ano | findstr :3000
+```
 
-### Erro: npm not found
-→ Reinstale Node.js + adicione ao PATH
+### O scanner pelo celular não conecta
 
-### Mais ajuda?
-→ Veja `INICIALIZACAO.md` (troubleshooting completo)
+Acrescente o IP do seu PC ao `CORS_ORIGINS` do `backend/.env`, por exemplo
+`https://192.168.0.10:3000`. Para descobrir o IP:
 
----
-
-## 📚 Documentação
-
-| Arquivo | Conteúdo |
-|---------|----------|
-| `INICIALIZACAO.md` | Guia detalhado + troubleshooting |
-| `CHECKPOINT_ETAPA_6.md` | Estado técnico do projeto |
-| `ETAPA_BONUS_RESUMO.txt` | Resumo do script .bat |
-| `.env.example` | Template variáveis |
+- Windows: `ipconfig` (procure "Endereço IPv4")
+- Linux/macOS: `hostname -I`
 
 ---
 
-## 🆘 Suporte
+## Papéis de acesso
 
-**Arquivo principal**: `INICIALIZACAO.md`
-**Documentação técnica**: `CHECKPOINT_ETAPA_6.md`
-**Estado do projeto**: Ver checklist em `CHECKPOINT_ETAPA_6.md`
+O sistema é multi-negócio. Cada usuário tem um vínculo por negócio:
 
----
+- **Dono** — acesso total, incluindo *Meu negócio* e *Funcionários*
+- **Funcionário** — apenas o que o dono marcar na tela *Funcionários*
 
-## 🎉 Sucesso!
+O seed cria três usuários (todos com a senha `admin123`):
 
-Se tudo funcionou:
-- 2 janelas abertas (Backend + Frontend) ✓
-- Dashboard exibindo KPIs ✓
-- Sem erros vermelhos ✓
-
-**Pronto para começar a usar o Dash Delivery ERP!**
-
----
-
-**Versão**: 6.0.0 | **Status**: Production Ready | **Data**: 04/08/2026
+| E-mail | Papel |
+|---|---|
+| `admin@local` | Dono |
+| `caixa@local` | Funcionário (PDV) |
+| `gerente@local` | Funcionário (gerência) |

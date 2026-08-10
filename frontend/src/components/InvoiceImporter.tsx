@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from 'react'
 import { useTenant } from '../context/TenantContext'
+import { api, apiGet, errorMessage, unwrap } from '../lib/api'
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -38,7 +39,9 @@ type Step = 'upload' | 'review' | 'mapping' | 'confirm' | 'done'
 
 export default function InvoiceImporter() {
   const { activeTenant } = useTenant()
-  const API = 'http://localhost:3001/api'
+  // Caminho relativo em vez de `http://localhost:3001`: aquele endereco so
+  // existe no navegador da propria maquina do backend.
+  const API = '/api'
 
   const [step,           setStep]           = useState<Step>('upload')
   const [xmlFile,        setXmlFile]        = useState<File | null>(null)
@@ -77,35 +80,34 @@ export default function InvoiceImporter() {
     form.append('xml', xmlFile)
 
     try {
-      const res  = await fetch(`${API}/invoices/parse`, {
-        method:  'POST',
-        headers: { 'X-Tenant-ID': activeTenant.id },
-        body:    form,
+      // `Content-Type: undefined` e obrigatorio no upload: o cliente axios tem
+      // 'application/json' como padrao, e mante-lo aqui apagaria o boundary do
+      // multipart, fazendo o backend receber o XML como corpo ilegivel.
+      const res = await api.post(`${API}/invoices/parse`, form, {
+        headers: { 'Content-Type': undefined },
       })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error)
+      const invoice = unwrap<ParsedInvoice>(res.data)
+      setParsed(invoice)
 
-      setParsed(json.data)
+      // Os ingredientes sao obrigatorios (sem eles nao ha o que mapear), mas
+      // categoria de DRE e caixa sao campos opcionais do formulario. Suas rotas
+      // ainda nao existem no backend e devolvem 404 — com `Promise.all` esse
+      // 404 derrubava a importacao inteira, mesmo com o XML lido corretamente.
+      // `allSettled` deixa o fluxo seguir com os selects vazios.
+      const ingJson = await apiGet<Ingredient[]>(`${API}/ingredients`)
+      setIngredients(ingJson || [])
 
-      // Carrega dependências em paralelo
-      const [ingRes, dreRes, cashRes] = await Promise.all([
-        fetch(`${API}/ingredients`, { headers: { 'X-Tenant-ID': activeTenant.id } }),
-        fetch(`${API}/dre-categories`, { headers: { 'X-Tenant-ID': activeTenant.id } }),
-        fetch(`${API}/cash-registers?status=open`, { headers: { 'X-Tenant-ID': activeTenant.id } }),
+      const [dreRes, cashRes] = await Promise.allSettled([
+        apiGet<DreCategory[]>(`${API}/dre-categories`),
+        apiGet<CashRegister[]>(`${API}/cash-registers`, { status: 'open' }),
       ])
-
-      const [ingJson, dreJson, cashJson] = await Promise.all([
-        ingRes.json(), dreRes.json(), cashRes.json(),
-      ])
-
-      setIngredients(ingJson.data  || [])
-      setDreCategories(dreJson.data || [])
-      setCashRegisters(cashJson.data || [])
+      setDreCategories(dreRes.status === 'fulfilled' ? dreRes.value ?? [] : [])
+      setCashRegisters(cashRes.status === 'fulfilled' ? cashRes.value ?? [] : [])
 
       // Pré-mapeia automaticamente por SKU igual
       const autoMap: Record<string, string> = {}
-      for (const item of json.data.items) {
-        const match = (ingJson.data || []).find(
+      for (const item of invoice?.items ?? []) {
+        const match = (ingJson || []).find(
           (i: Ingredient) => i.sku === item.codigoProduto
         )
         if (match) autoMap[item.codigoProduto] = match.id
@@ -113,8 +115,10 @@ export default function InvoiceImporter() {
       setMappings(autoMap)
 
       setStep('review')
-    } catch (err: any) {
-      setError(err.message)
+    } catch (err: unknown) {
+      // `err.message` do axios seria "Request failed with status code 400";
+      // `errorMessage` extrai o motivo real que a API devolveu.
+      setError(errorMessage(err, 'Nao foi possivel ler o XML da nota.'))
     } finally {
       setLoading(false)
     }
@@ -139,18 +143,13 @@ export default function InvoiceImporter() {
     if (dueDate)        form.append('dueDate', dueDate)
 
     try {
-      const res  = await fetch(`${API}/invoices/process`, {
-        method:  'POST',
-        headers: { 'X-Tenant-ID': activeTenant.id },
-        body:    form,
+      const res = await api.post(`${API}/invoices/process`, form, {
+        headers: { 'Content-Type': undefined },
       })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error)
-
-      setResult(json)
+      setResult(res.data)
       setStep('done')
-    } catch (err: any) {
-      setError(err.message)
+    } catch (err: unknown) {
+      setError(errorMessage(err, 'Nao foi possivel importar a nota.'))
     } finally {
       setLoading(false)
     }

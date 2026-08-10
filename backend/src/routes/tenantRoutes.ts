@@ -11,6 +11,10 @@ import { asyncHandler, ok, createdResponse, notFound, badRequest, forbidden, req
 import { authenticate, signToken } from '../middleware/auth.js'
 import { validate, z } from '../lib/validate.js'
 import { slugify } from '../lib/slug.js'
+// Reusa o schema de horarios em vez de aceitar `any`: um JSON fora do formato
+// era gravado sem reclamacao e depois caia no fallback de `computeStoreStatus`,
+// fazendo a loja se comportar como se nao tivesse horario configurado.
+import { openingHoursSchema } from '../services/storeService.js'
 
 const router = Router()
 
@@ -115,7 +119,7 @@ router.get(
 const createSchema = z.object({
   name: z.string().min(2, 'Informe o nome do negócio').trim(),
   logoData: z.string().trim().optional(),
-  openingHours: z.any().optional(),
+  openingHours: openingHoursSchema.optional(),
   phone: z.string().trim().optional(),
   address: z.string().trim().optional(),
   city: z.string().trim().optional(),
@@ -173,7 +177,7 @@ router.post(
 const updateSchema = z.object({
   name: z.string().min(2, 'Informe o nome do negócio').trim().optional(),
   logoData: z.string().trim().nullable().optional(),
-  openingHours: z.any().optional(),
+  openingHours: openingHoursSchema.optional(),
   phone: z.string().trim().nullable().optional(),
   address: z.string().trim().nullable().optional(),
   city: z.string().trim().nullable().optional(),

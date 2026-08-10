@@ -1,9 +1,20 @@
 @echo off
 setlocal enabledelayedexpansion
 
-REM Forca o script a rodar na pasta onde ele esta salvo
-cd /d "%~dp0"
+REM ============================================================
+REM  DASH DELIVERY ERP - INICIALIZACAO (Windows)
+REM
+REM  Duplo clique neste arquivo. NAO precisa de Administrador.
+REM
+REM  O que este script faz, na ordem:
+REM    1. confere Node.js e habilita o pnpm
+REM    2. cria backend\.env na primeira vez (com JWT_SECRET aleatorio)
+REM    3. instala dependencias (pnpm, na raiz - e um workspace)
+REM    4. cria/atualiza o banco e popula o usuario de acesso
+REM    5. sobe backend (3001) e frontend (3000) em duas janelas
+REM ============================================================
 
+cd /d "%~dp0"
 cls
 echo.
 echo =======================================================
@@ -12,118 +23,159 @@ echo                    Multi-Tenant v6.0.0
 echo =======================================================
 echo.
 
-REM Verificar se esta rodando como Administrador
-net session >nul 2>&1
+REM ---------------------------------------------------------
+REM 1. Node.js e pnpm
+REM
+REM Este projeto e um workspace pnpm (ver pnpm-workspace.yaml) e
+REM fixa "packageManager": "pnpm". Instalar com npm nas subpastas
+REM ignora o workspace e o bloco onlyBuiltDependencies, que e o
+REM que autoriza o Prisma a baixar o query engine.
+REM ---------------------------------------------------------
+where node >nul 2>&1
 if %errorlevel% neq 0 (
-    echo AVISO: Este script deve ser executado como Administrador.
-    echo Clique direito no arquivo e selecione "Executar como Administrador".
+    echo ERRO: Node.js nao encontrado.
+    echo Instale a versao LTS em https://nodejs.org e abra este arquivo de novo.
+    echo.
     pause
     exit /b 1
 )
+for /f "delims=" %%v in ('node -v') do echo Node.js %%v encontrado.
 
-echo Permissoes de Administrador detectadas.
-echo.
-
-REM =========================================
-REM 1. VERIFICAR PASTA E DEPENDENCIAS DO BACKEND
-REM =========================================
-echo Verificando pasta Backend...
-if not exist "backend" (
-    echo ERRO: A pasta "backend" nao foi encontrada neste diretorio!
-    pause
-    exit /b 1
-)
-
-cd backend
-
-if not exist node_modules (
-    echo Instalando dependencias do Backend...
-    call npm install --legacy-peer-deps
-    if %errorlevel% neq 0 (
-        echo Erro ao instalar dependencias do backend.
-        pause
-        exit /b 1
+set "PNPM=pnpm"
+where pnpm >nul 2>&1
+if %errorlevel% neq 0 (
+    echo pnpm nao encontrado. Habilitando via corepack...
+    call corepack enable >nul 2>&1
+    where pnpm >nul 2>&1
+    if !errorlevel! neq 0 (
+        echo Usando "npx pnpm" como alternativa.
+        set "PNPM=npx --yes pnpm"
     )
-) else (
-    echo Dependencias do Backend ja existem.
 )
-
-REM =========================================
-REM 2. SINCRONIZAR BANCO DE DADOS
-REM =========================================
+echo Gerenciador de pacotes: !PNPM!
 echo.
-echo [1/2] Gerando cliente Prisma...
-call npx prisma generate
+
+REM ---------------------------------------------------------
+REM 2. backend\.env
+REM
+REM Sem este arquivo o Prisma falha com uma mensagem obscura
+REM ("Environment variable not found: DATABASE_URL").
+REM ---------------------------------------------------------
+if not exist "backend\.env" (
+    echo Primeira execucao: criando backend\.env a partir do exemplo...
+    copy /y "backend\.env.example" "backend\.env" >nul
+
+    REM JWT_SECRET aleatorio: o valor do exemplo nao serve para uso real.
+    REM Feito com Node (ja verificado acima) em vez de PowerShell: o valor e
+    REM hexadecimal, entao dispensa aspas no .env e evita escapes fragis no bat.
+    node -e "const f=require('fs'),p='backend/.env';let c=f.readFileSync(p,'utf8');c=c.replace(/^JWT_SECRET=.*$/m,'JWT_SECRET='+require('crypto').randomBytes(48).toString('hex'));f.writeFileSync(p,c)"
+
+    echo.
+    echo    backend\.env criado com JWT_SECRET aleatorio.
+    echo.
+    echo    ATENCAO: confira a senha do PostgreSQL dentro dele.
+    echo    A linha DATABASE_URL vem com o padrao postgres:postgres.
+    echo    Se a sua senha for outra, edite o arquivo antes de continuar.
+    echo.
+    pause
+) else (
+    echo backend\.env ja existe.
+)
+echo.
+
+REM ---------------------------------------------------------
+REM 3. Dependencias (na RAIZ - workspace)
+REM ---------------------------------------------------------
+echo Instalando dependencias do projeto...
+call !PNPM! install
 if %errorlevel% neq 0 (
     echo.
-    echo ------------------------------------------------ai
-    echo ERRO CRITICO: Falha ao executar "npx prisma generate".
-    echo Verifique se o schema.prisma existe na pasta backend/prisma.
-    echo --------------------------------------------------
+    echo ERRO: falha ao instalar as dependencias.
+    echo Verifique sua conexao com a internet e tente novamente.
+    echo.
+    pause
+    exit /b 1
+)
+echo Dependencias prontas.
+echo.
+
+REM ---------------------------------------------------------
+REM 4. Banco de dados
+REM
+REM "migrate deploy" aplica as migrations versionadas e cria o
+REM banco caso ele ainda nao exista (nao usar "db push": ele
+REM ignora o historico de migrations e causa divergencia).
+REM ---------------------------------------------------------
+echo [1/3] Gerando cliente Prisma...
+call !PNPM! --filter delivery-erp-backend db:generate
+if %errorlevel% neq 0 (
+    echo.
+    echo ERRO: falha no "prisma generate".
+    echo.
     pause
     exit /b 1
 )
 
-echo.
-echo [2/2] Sincronizando com o PostgreSQL (db push)...
-call npx prisma db push --skip-generate
+REM db:deploy = "prisma migrate deploy". NAO usar db:migrate aqui: aquele e o
+REM "migrate dev", que e interativo e pode oferecer RESETAR o banco (apagando
+REM suas vendas) quando detecta divergencia no schema.
+echo [2/3] Aplicando migrations no PostgreSQL...
+call !PNPM! --filter delivery-erp-backend db:deploy
 if %errorlevel% neq 0 (
     echo.
     echo --------------------------------------------------
-    echo AVISO/ERRO: O Banco de Dados PostgreSQL parece estar 
-    echo desligado ou inacessivel na porta 5432!
-    echo Certifique-se de que o servico do Postgres esta ativo.
+    echo ERRO: nao foi possivel falar com o PostgreSQL.
+    echo.
+    echo Verifique:
+    echo   1. O servico do PostgreSQL esta rodando?
+    echo      Win+R  ^>  services.msc  ^>  procure "postgresql"
+    echo   2. A senha em backend\.env (DATABASE_URL) esta correta?
+    echo   3. A porta esta certa? O padrao do Postgres e 5432.
+    echo.
+    echo O banco NAO precisa existir: as migrations criam ele.
     echo --------------------------------------------------
-    pause
-) else (
-    echo Banco de dados sincronizado com sucesso.
-)
-
-cd ..
-
-REM =========================================
-REM 3. VERIFICAR PASTA E DEPENDENCIAS DO FRONTEND
-REM =========================================
-echo.
-echo Verificando pasta Frontend...
-if not exist "frontend" (
-    echo ERRO: A pasta "frontend" nao foi encontrada neste diretorio!
+    echo.
     pause
     exit /b 1
 )
 
-cd frontend
-
-if not exist node_modules (
-    echo Instalando dependencias do Frontend...
-    call npm install --legacy-peer-deps
-    if %errorlevel% neq 0 (
-        echo Erro ao instalar dependencias do frontend.
-        pause
-        exit /b 1
-    )
-) else (
-    echo Dependencias do Frontend ja existem.
+REM O seed usa upsert, entao rodar sempre e seguro: ele nao apaga
+REM pedidos nem cadastros ja existentes. Sem ele nao existe nenhum
+REM usuario e a tela de login fica intransponivel.
+echo [3/3] Garantindo usuario de acesso (seed)...
+call !PNPM! --filter delivery-erp-backend db:seed
+if %errorlevel% neq 0 (
+    echo AVISO: o seed falhou. O sistema sobe, mas talvez sem usuario para entrar.
+    pause
 )
-
-cd ..
-
-REM =========================================
-REM 4. INICIAR SERVIDORES
-REM =========================================
+echo Banco de dados pronto.
 echo.
+
+REM ---------------------------------------------------------
+REM 5. Subir os servidores
+REM ---------------------------------------------------------
 echo Iniciando servidores...
-echo    - Backend na porta 3001
-echo    - Frontend na porta 5173
+echo    - Backend  em http://localhost:3001
+echo    - Frontend em http://localhost:3000
 echo.
 
-start "Dash Delivery - Backend" cmd /k "cd backend && npm run dev"
+start "Dash Delivery - Backend" cmd /k "cd /d "%~dp0backend" && !PNPM! dev"
+timeout /t 5 /nobreak >nul
+start "Dash Delivery - Frontend" cmd /k "cd /d "%~dp0frontend" && !PNPM! dev"
+
 timeout /t 3 /nobreak >nul
-start "Dash Delivery - Frontend" cmd /k "cd frontend && npm run dev"
+start "" "http://localhost:3000"
 
 echo.
-echo =========================================
-echo INICIALIZACAO CONCLUIDA COM SUCESSO!
-echo =========================================
+echo =======================================================
+echo  PRONTO! O navegador vai abrir em http://localhost:3000
+echo.
+echo  Entre com:
+echo     e-mail: admin@local
+echo     senha:  admin123
+echo.
+echo  Para parar: feche as duas janelas de terminal.
+echo =======================================================
+echo.
 pause
 exit /b 0

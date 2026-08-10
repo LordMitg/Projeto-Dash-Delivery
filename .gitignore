@@ -9,6 +9,15 @@ dist/
 *.tsbuildinfo
 .tmp/
 
+# Saida de `tsc` emitida ao lado do fonte.
+#
+# Um `tsc` sem --noEmit gera um .js ao lado de cada .tsx dentro de src/, e a
+# ordem padrao de resolve.extensions do Vite tenta '.js' ANTES de '.tsx'. O
+# import sem extensao passa a carregar o JS antigo, e toda edicao no .tsx e
+# silenciosamente ignorada no bundle — sem erro de build para denunciar.
+frontend/src/**/*.js
+frontend/src/**/*.js.map
+
 # Environment (o .env.example continua versionado)
 .env
 .env.local

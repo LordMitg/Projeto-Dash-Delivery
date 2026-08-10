@@ -102,8 +102,11 @@ model User {
   memberships     Membership[]
 
   // Relações
-  orders          Order[]
-  deliveries      Delivery[]
+  orders            Order[]
+  deliveries        Delivery[]
+  cashRegistersOpened CashRegister[] @relation("CashOpenedBy")
+  cashRegistersClosed CashRegister[] @relation("CashClosedBy")
+  cashEntries       CashEntry[]
 
   @@map("users")
 }
@@ -328,7 +331,10 @@ model Order {
   // Troco devido = changeFor - totalAmount (calculado e persistido na venda).
   changeAmount    Decimal? @db.Decimal(10, 2)
 
-  paymentMethod   String   @default("cash")    // cash | credit | debit | pix | voucher
+  // Forma PRINCIPAL de pagamento: a de maior valor entre `payments`. Mantida
+  // porque relatorios e o DRE ja a consultam. O detalhe real de quem pagou o
+  // que vive em `payments`, que aceita varias formas na mesma venda.
+  paymentMethod   String   @default("cash")    // cash | credit | debit | pix | voucher | fiado
   paymentStatus   String   @default("pending") // pending | paid
   observations    String?
   printedKitchen  Boolean  @default(false)
@@ -355,7 +361,14 @@ model Order {
   salesChannelId  String?
   salesChannel    SalesChannel? @relation(fields: [salesChannelId], references: [id])
 
+  // Turno de caixa em que a venda foi registrada. Sem esse vinculo o
+  // fechamento nao teria como somar as vendas do turno, e a conferencia de
+  // dinheiro em gaveta seria um chute.
+  cashRegisterId  String?
+  cashRegister    CashRegister? @relation(fields: [cashRegisterId], references: [id])
+
   orderItems      OrderItem[]
+  payments        OrderPayment[]
   delivery        Delivery?
   deliveryQuote   DeliveryQuote?
 
@@ -363,7 +376,34 @@ model Order {
   @@index([tenantId])
   @@index([customerId])
   @@index([createdById])
+  @@index([cashRegisterId])
   @@map("orders")
+}
+
+// ========== ORDER PAYMENT MODEL ==========
+/// Uma linha por forma de pagamento usada na venda.
+///
+/// Existe porque `Order.paymentMethod` guarda um unico texto, e restaurante
+/// vive de conta dividida: "R$ 50 no cartao e R$ 30 em dinheiro" nao cabia no
+/// modelo antigo. O troco fica aqui, na linha em dinheiro, e nao no pedido:
+/// so a parcela em especie gera troco.
+model OrderPayment {
+  id            String   @id @default(cuid())
+  method        String                              // cash | credit | debit | pix | voucher | fiado
+  amount        Decimal  @db.Decimal(10, 2)
+  /// Valor em especie entregue pelo cliente nesta parcela.
+  changeFor     Decimal? @db.Decimal(10, 2)
+  /// Troco desta parcela = changeFor - amount.
+  changeAmount  Decimal? @db.Decimal(10, 2)
+  /// Bandeira/adquirente, quando cartao (ex.: "Visa", "Master").
+  cardBrand     String?
+  createdAt     DateTime @default(now())
+
+  orderId       String
+  order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("order_payments")
 }
 
 // ========== ORDER ITEM MODEL ==========
@@ -499,29 +539,53 @@ model CashRegister {
 
   // Relações
   openedById      String
+  openedBy        User     @relation("CashOpenedBy", fields: [openedById], references: [id])
+  // Quem fechou pode nao ser quem abriu (troca de turno).
+  closedById      String?
+  closedBy        User?    @relation("CashClosedBy", fields: [closedById], references: [id])
+
   cashEntries     CashEntry[]
+  orders          Order[]
 
   @@index([tenantId])
+  @@index([status])
   @@map("cash_registers")
 }
 
 // ========== CASH ENTRY (LANÇAMENTO DE CAIXA) ==========
 // Cada movimentação dentro de uma sessão de caixa
+/// Todo movimento de dinheiro dentro de um turno de caixa.
+///
+/// `type` distingue a natureza do lancamento, e isso importa no fechamento:
+/// - `sale`       venda registrada pelo PDV (entra)
+/// - `supply`     suprimento / troco inicial adicionado (entra)
+/// - `withdrawal` sangria: retirada para o cofre (sai)
+/// - `expense`    despesa paga pela gaveta (sai)
+/// - `refund`     estorno/cancelamento devolvido ao cliente (sai)
+///
+/// Apenas lancamentos em `cash` afetam o dinheiro em gaveta. Cartao e Pix
+/// entram no faturamento do turno mas nao na conferencia da gaveta — misturar
+/// os dois era a causa classica de "caixa sempre sobrando".
 model CashEntry {
   id              String       @id @default(cuid())
-  type            String                          // income | expense
+  type            String                          // sale | supply | withdrawal | expense | refund
   amount          Decimal      @db.Decimal(10, 2)
   description     String
-  paymentMethod   String       @default("cash")   // cash | credit | debit | pix
+  paymentMethod   String       @default("cash")   // cash | credit | debit | pix | voucher | fiado
   referenceType   String?                         // order | invoice | manual
   referenceId     String?                         // id do pedido/nota vinculado
   createdAt       DateTime     @default(now())
+
+  // Quem lancou: sangria e despesa precisam de responsavel nomeado.
+  createdById     String?
+  createdBy       User?        @relation(fields: [createdById], references: [id])
 
   // Relações
   cashRegisterId  String
   cashRegister    CashRegister @relation(fields: [cashRegisterId], references: [id], onDelete: Cascade)
 
   @@index([cashRegisterId])
+  @@index([type])
   @@map("cash_entries")
 }
 

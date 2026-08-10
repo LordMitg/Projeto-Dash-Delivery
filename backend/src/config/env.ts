@@ -30,7 +30,14 @@ const envSchema = z.object({
 
   // Origens liberadas no CORS. O frontend roda em HTTPS na LAN, entao o IP
   // da maquina tambem precisa ser aceito.
-  CORS_ORIGINS: z.string().default('https://localhost:5173,http://localhost:5173'),
+  //
+  // Precisa casar com a porta do Vite (`frontend/vite.config.ts`), que e 3000 e
+  // usa `strictPort`. O default cobria apenas 5173: o app abria em
+  // localhost:3000 e TODA chamada de API morria no CORS — tela montada, vazia,
+  // e nenhum erro visivel fora do console do navegador.
+  CORS_ORIGINS: z
+    .string()
+    .default('https://localhost:3000,http://localhost:3000,https://localhost:5173,http://localhost:5173'),
 
   BCRYPT_ROUNDS: z.coerce.number().int().min(8).max(15).default(10),
 

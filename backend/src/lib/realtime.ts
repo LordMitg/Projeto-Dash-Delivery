@@ -27,6 +27,11 @@ export type RealtimeEvent =
   | 'order:cancelled'
   | 'store:status'
   | 'stock:low'
+  // Caixa: o PDV escuta para liberar ou bloquear a venda na hora, sem o
+  // operador precisar recarregar a tela quando o gerente abre ou fecha o turno.
+  | 'cash:opened'
+  | 'cash:entry'
+  | 'cash:closed'
 
 /** Publica um evento para todos os dispositivos daquela loja. */
 export function emitToTenant(tenantId: string, event: RealtimeEvent, payload: unknown) {

@@ -14,6 +14,12 @@
  * E idempotente: pode rodar quantas vezes quiser sem duplicar dados,
  * porque usa `upsert` em todas as entidades.
  */
+// Precisa vir ANTES do PrismaClient: o construtor le DATABASE_URL no momento da
+// importacao. Sem esta linha, `pnpm db:seed` falhava com "Environment variable
+// not found: DATABASE_URL" mesmo com o backend/.env preenchido — porque o
+// `prisma migrate` carrega o .env sozinho, mas `tsx prisma/seed.ts` nao.
+// Reusa o carregamento de env do servidor em vez de duplicar dotenv aqui.
+import '../src/config/env.js'
 import { PrismaClient, Prisma } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import { ROLE_PRESETS } from '../src/lib/permissions.js'

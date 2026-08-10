@@ -1,1090 +1,795 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { useTenant } from '../context/TenantContext';
-import { usePrinter } from '../hooks/usePrinter';
-import type { PrintKitchenPayload, PrintDeliveryPayload } from '../hooks/usePrinter';
-import { apiGet, apiPost, errorMessage } from '../lib/api';
+/**
+ * Frente de caixa (PDV).
+ *
+ * Tela de operacao, nao de gestao: roda em tela cheia, no escuro, com alvos de
+ * toque grandes e o total sempre visivel. As decisoes principais:
+ *
+ * 1. **Sem caixa aberto, sem venda.** O servidor recusa (`CASH_CLOSED`) e a tela
+ *    tambem bloqueia antes de o operador montar a comanda inteira e descobrir no
+ *    fim. Toda venda pertence a um turno identificado, senao o fechamento nao
+ *    tem com o que comparar a gaveta.
+ *
+ * 2. **O servidor e a autoridade sobre o dinheiro.** Os totais daqui existem
+ *    para o operador conferir com o cliente; quem calcula de verdade e a API. Por
+ *    isso a taxa de entrega espelha `resolveDeliveryFee` do backend em vez de
+ *    inventar a propria conta.
+ *
+ * 3. **Atalhos de teclado.** F2 busca, F4 fecha a venda, Esc limpa. Quem opera
+ *    caixa o dia inteiro trabalha com a mao no teclado, nao no mouse.
+ *
+ * 4. **Falha de impressao nao invalida a venda.** O pedido ja esta salvo; o
+ *    operador e avisado para reimprimir, em vez de a venda ser desfeita.
+ */
 
-// ─── Tipos ────────────────────────────────────────────────────────────────────
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  AlertTriangle,
+  Bike,
+  CheckCircle2,
+  Lock,
+  LogOut,
+  Percent,
+  Printer,
+  ShoppingBag,
+  Store,
+  User,
+  Wifi,
+  WifiOff,
+} from 'lucide-react'
+import { Link } from 'react-router-dom'
 
-interface Product {
-  id: string;
-  name: string;
-  sku: string;
-  price: string;
-  category: string | null;
-  /**
-   * A categoria de verdade vem da relacao `menuCategory`; o campo `category`
-   * e um texto legado que hoje chega nulo. As abas do PDV usam menuCategory
-   * primeiro, senao toda a grade caia em "Outros".
-   */
-  menuCategory?: { id: string; name: string } | null;
-  productType: string;
-  comboOptions: ComboOption[] | null;
-  active: boolean;
-}
+import { apiGet, apiPost, errorMessage } from '../lib/api'
+import { useAuth } from '../context/AuthContext'
+import { useTenant } from '../context/TenantContext'
+import { useCashRegister } from '../hooks/useCashRegister'
+import { usePrinter } from '../hooks/usePrinter'
+import { useRealtime } from '../hooks/useRealtime'
 
-interface ComboOption {
-  group: string;
-  label: string;
-  ingredientId: string;
-}
-
-interface CartItem {
-  product: Product;
-  quantity: number;
-  observations: string;
-  selectedProtein: ComboOption | null;
-}
-
-interface Customer {
-  id: string;
-  name: string;
-  phone: string;
-  address?: string;
-  /** Bairro salvo no cadastro: define a taxa de entrega. */
-  neighborhood?: string;
-  city?: string;
-  ltv: string;
-  totalOrders: number;
-}
-
-/** Pedido retornado por `POST /api/orders`. */
-interface OrderResponse {
-  id: string;
-  /** `String` no schema do Prisma, nao numero: e um codigo como "0001". */
-  orderNumber: string;
-  orderType: string;
-  totalAmount: string;
-  createdAt: string;
-  customer?: Customer | null;
-}
-
-type PaymentMethod = 'cash' | 'credit' | 'debit' | 'pix' | 'voucher';
-type OrderType = 'delivery' | 'balcao';
-
-// ─── Constantes ───────────────────────────────────────────────────────────────
-
-const PAYMENT_LABELS: Record<PaymentMethod, string> = {
-  cash: 'Dinheiro',
-  credit: 'Credito',
-  debit: 'Debito',
-  pix: 'PIX',
-  voucher: 'Vale',
-};
-
-const CATEGORY_COLORS: Record<string, string> = {
-  'Proteina': '#e74c3c',
-  'Acompanhamento': '#27ae60',
-  'Bebida': '#2980b9',
-  'Sobremesa': '#8e44ad',
-  'Combo': '#e67e22',
-};
-
-// ─── Componente Principal ─────────────────────────────────────────────────────
-
-/** Categoria exibida nas abas: relacao primeiro, texto legado depois. */
-function productCategory(p: Product): string {
-  return p.menuCategory?.name || p.category || 'Outros';
-}
+import { CartPanel } from './pdv/CartPanel'
+import { ItemDialog } from './pdv/ItemDialog'
+import { PaymentDialog } from './pdv/PaymentDialog'
+import { ProductGrid } from './pdv/ProductGrid'
+import {
+  brl,
+  lineTotal,
+  newLineId,
+  ORDER_TYPE_LABELS,
+  productCategory,
+  round2,
+  type CartItem,
+  type ChosenAddon,
+  type ComboOption,
+  type Customer,
+  type OrderResponse,
+  type OrderType,
+  type PaymentSplit,
+  type Product,
+} from './pdv/types'
 
 export function PDV() {
-  const { activeTenant } = useTenant();
-  const { printKitchen, printDelivery, paperWidth } = usePrinter();
+  const { activeTenant } = useTenant()
+  const { user, logout, can } = useAuth()
+  const { printKitchen, printDelivery } = usePrinter()
+  const cash = useCashRegister()
+  const { status: liveStatus } = useRealtime()
 
-  // Catálogo
-  const [products, setProducts] = useState<Product[]>([]);
-  const [categories, setCategories] = useState<string[]>([]);
-  const [activeCategory, setActiveCategory] = useState<string>('Todos');
-  const [search, setSearch] = useState('');
-  const [loadingProducts, setLoadingProducts] = useState(true);
-  const [productsError, setProductsError] = useState<string | null>(null);
-  // Incrementado pelo "Tentar de novo": entra nas deps do efeito de catalogo.
-  const [reloadKey, setReloadKey] = useState(0);
+  // ── Catalogo ──────────────────────────────────────────────────────────────
+  const [products, setProducts] = useState<Product[]>([])
+  const [loadingProducts, setLoadingProducts] = useState(true)
+  const [productsError, setProductsError] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [activeCategory, setActiveCategory] = useState('Todos')
 
-  // Carrinho
-  const [cart, setCart] = useState<CartItem[]>([]);
-  const [orderType, setOrderType] = useState<OrderType>('delivery');
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
-  const [discount, setDiscount] = useState(0);
-  const [orderObservations, setOrderObservations] = useState('');
+  // ── Comanda ───────────────────────────────────────────────────────────────
+  const [cart, setCart] = useState<CartItem[]>([])
+  const [orderType, setOrderType] = useState<OrderType>('balcao')
+  const [discount, setDiscount] = useState(0)
+  const [orderNotes, setOrderNotes] = useState('')
 
-  // Cliente
-  const [customerSearch, setCustomerSearch] = useState('');
-  const [foundCustomer, setFoundCustomer] = useState<Customer | null>(null);
-  const [newCustomerForm, setNewCustomerForm] = useState({
-    name: '',
-    phone: '',
-    address: '',
-    neighborhood: '',
-    city: '',
-  });
-  /** Bairro do pedido: define a taxa de entrega cobrada pelo servidor. */
-  const [deliveryZone, setDeliveryZone] = useState('');
-  const [customerMode, setCustomerMode] = useState<'search' | 'new' | 'found'>('search');
+  // ── Cliente e entrega ─────────────────────────────────────────────────────
+  const [phone, setPhone] = useState('')
+  const [customer, setCustomer] = useState<Customer | null>(null)
+  const [searchingCustomer, setSearchingCustomer] = useState(false)
+  const [deliveryZone, setDeliveryZone] = useState('')
 
-  // Modais
-  const [comboModal, setComboModal] = useState<{ product: Product; cartIndex: number | null } | null>(null);
-  const [checkoutModal, setCheckoutModal] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  // Tipado: era `any`, o que deixava passar `data.order.orderNumber` mesmo
-  // depois de a API ter mudado o formato da resposta.
-  const [lastOrder, setLastOrder] = useState<OrderResponse | null>(null);
-  const [successModal, setSuccessModal] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-  const [printWarning, setPrintWarning] = useState<string | null>(null);
-  const [lastPrint, setLastPrint] = useState<{
-    kitchen: PrintKitchenPayload;
-    delivery: PrintDeliveryPayload | null;
-  } | null>(null);
+  // ── Dialogos e envio ──────────────────────────────────────────────────────
+  const [itemDialog, setItemDialog] = useState<{
+    product: Product
+    lineId: string | null
+  } | null>(null)
+  const [payOpen, setPayOpen] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [lastSale, setLastSale] = useState<{
+    order: OrderResponse
+    change: number
+    printFailed: boolean
+  } | null>(null)
+
+  const searchRef = useRef<HTMLInputElement>(null)
 
   // ── Carregar produtos ─────────────────────────────────────────────────────
   useEffect(() => {
-    if (!activeTenant) return;
+    if (!activeTenant) return
+    let alive = true
+    setLoadingProducts(true)
+    setProductsError(null)
 
-    let cancelled = false;
-    setLoadingProducts(true);
-    setProductsError(null);
-
-    // `apiGet` em vez de `fetch` cru: a API responde no envelope
-    // `{ success, data }`, e o codigo antigo lia `data.products` — uma chave
-    // que nunca existiu. A grade ficava vazia com o catalogo cheio, e sem
-    // `catch` a falha era silenciosa. O helper desempacota e injeta o token.
-    // O prefixo `/api` e obrigatorio: e o caminho que o proxy do Vite
-    // encaminha para o backend. Sem ele o Vite devolve o index.html e o
-    // catalogo fica vazio sem nenhum erro aparecer.
     apiGet<Product[]>('/api/products', { active: true })
       .then((list) => {
-        if (cancelled) return;
-        const items = Array.isArray(list) ? list : [];
-        setProducts(items);
-        const cats = Array.from(
-          new Set(items.map((p) => productCategory(p)).filter(Boolean)),
-        );
-        setCategories(['Todos', ...cats]);
+        if (!alive) return
+        setProducts(Array.isArray(list) ? list.filter((p) => p.active) : [])
       })
       .catch((err) => {
-        if (cancelled) return;
-        setProductsError(errorMessage(err, 'Nao foi possivel carregar o catalogo.'));
-        setProducts([]);
+        if (!alive) return
+        setProductsError(errorMessage(err, 'Não foi possível carregar os produtos.'))
+        setProducts([])
       })
       .finally(() => {
-        if (!cancelled) setLoadingProducts(false);
-      });
+        if (alive) setLoadingProducts(false)
+      })
 
     return () => {
-      cancelled = true;
-    };
-  }, [activeTenant, reloadKey]);
-
-  // ── Buscar cliente por telefone ───────────────────────────────────────────
-  const searchCustomer = useCallback(
-    async (phone: string) => {
-      if (phone.length < 8 || !activeTenant) return;
-      try {
-        // Mesma correcao do catalogo: o token vive em `delivery_erp_token`, nao
-        // em `token`, entao este fetch ia sem Authorization e voltava 401 —
-        // silenciosamente, porque o `if (res.ok)` engolia a falha e o operador
-        // via o formulario de "novo cliente" mesmo para quem ja era cadastrado.
-        const list = await apiGet<Customer[]>('/api/customers', { phone });
-        const found = Array.isArray(list) ? list[0] : undefined;
-        if (found) {
-          setFoundCustomer(found);
-          setCustomerMode('found');
-          // Cliente conhecido ja traz o bairro: aplica a taxa dele sem o
-          // operador precisar reinformar (e sem risco de escolher outro).
-          if (found.neighborhood) setDeliveryZone(found.neighborhood);
-          return;
-        }
-      } catch {
-        // Falha de busca nao pode travar a venda: cai no cadastro manual.
-      }
-      setFoundCustomer(null);
-      setNewCustomerForm((f) => ({ ...f, phone }));
-      setCustomerMode('new');
-    },
-    [activeTenant]
-  );
-
-  // ── Gerenciar carrinho ────────────────────────────────────────────────────
-
-  function addToCart(product: Product) {
-    if (product.productType === 'combo' && product.comboOptions?.length) {
-      setComboModal({ product, cartIndex: null });
-      return;
+      alive = false
     }
-    setCart((prev) => {
-      const idx = prev.findIndex((i) => i.product.id === product.id && !i.observations);
-      const existing = idx >= 0 ? prev[idx] : undefined;
-      if (existing) {
-        const next = [...prev];
-        next[idx] = { ...existing, quantity: existing.quantity + 1 };
-        return next;
+  }, [activeTenant])
+
+  // ── Buscar cliente pelo telefone ──────────────────────────────────────────
+  useEffect(() => {
+    const digits = phone.replace(/\D/g, '')
+    if (digits.length < 8 || !activeTenant) {
+      setCustomer(null)
+      return
+    }
+
+    // Espera o operador parar de digitar: uma consulta por tecla geraria uma
+    // rajada de requisicoes e o resultado poderia chegar fora de ordem.
+    const timer = setTimeout(() => {
+      let alive = true
+      setSearchingCustomer(true)
+      apiGet<Customer[]>('/api/customers', { phone: digits })
+        .then((list) => {
+          if (!alive) return
+          const found = Array.isArray(list) ? (list[0] ?? null) : null
+          setCustomer(found)
+          // Preenche o bairro do cadastro: e o que define a taxa de entrega.
+          if (found?.neighborhood) setDeliveryZone(found.neighborhood)
+        })
+        .catch(() => {
+          if (alive) setCustomer(null)
+        })
+        .finally(() => {
+          if (alive) setSearchingCustomer(false)
+        })
+      return () => {
+        alive = false
       }
-      return [...prev, { product, quantity: 1, observations: '', selectedProtein: null }];
-    });
-  }
+    }, 400)
 
-  function updateQty(idx: number, delta: number) {
-    setCart((prev) => {
-      const target = prev[idx];
-      if (!target) return prev;
-      const next = [...prev];
-      const newQty = target.quantity + delta;
-      if (newQty <= 0) {
-        next.splice(idx, 1);
-      } else {
-        next[idx] = { ...target, quantity: newQty };
-      }
-      return next;
-    });
-  }
+    return () => clearTimeout(timer)
+  }, [phone, activeTenant])
 
-  function confirmCombo(protein: ComboOption) {
-    if (!comboModal) return;
-    const { product, cartIndex } = comboModal;
-    setCart((prev) => {
-      const target = cartIndex !== null ? prev[cartIndex] : undefined;
-      if (cartIndex !== null && target) {
-        const next = [...prev];
-        next[cartIndex] = { ...target, selectedProtein: protein };
-        return next;
-      }
-      return [...prev, { product, quantity: 1, observations: '', selectedProtein: protein }];
-    });
-    setComboModal(null);
-  }
+  // ── Categorias e filtro ───────────────────────────────────────────────────
+  const categories = useMemo(() => {
+    const set = new Set(products.map(productCategory))
+    return [...set].sort((a, b) => a.localeCompare(b, 'pt-BR'))
+  }, [products])
 
-  const subtotal = cart.reduce((acc, i) => acc + Number(i.product.price) * i.quantity, 0);
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase()
+    return products.filter((p) => {
+      const matchCategory = activeCategory === 'Todos' || productCategory(p) === activeCategory
+      // Busca tambem por SKU e codigo de barras: quem tem leitor aponta para o
+      // produto e o codigo cai no campo de busca.
+      const matchTerm =
+        !term ||
+        p.name.toLowerCase().includes(term) ||
+        p.sku?.toLowerCase().includes(term) ||
+        p.barcode?.toLowerCase().includes(term)
+      return matchCategory && matchTerm
+    })
+  }, [products, activeCategory, search])
 
-  /** Bairros cadastrados na loja, com a taxa de cada um. */
-  const zones = activeTenant?.deliveryZones ?? [];
+  // ── Totais ────────────────────────────────────────────────────────────────
+  const subtotal = round2(cart.reduce((sum, item) => sum + lineTotal(item), 0))
 
-  /** Zona escolhida, casada sem diferenciar maiuscula (igual ao servidor). */
+  const zones = activeTenant?.deliveryZones ?? []
   const selectedZone =
-    zones.find((z) => z.name.toLowerCase() === deliveryZone.toLowerCase()) ?? null;
+    zones.find((z) => z.name.toLowerCase() === deliveryZone.trim().toLowerCase()) ?? null
 
   /**
    * Taxa de entrega, espelhando `resolveDeliveryFee` do backend: so incide em
-   * delivery, e o servidor e quem tem a palavra final. Aqui ela existe apenas
-   * para o operador ver o mesmo valor que sera cobrado — antes o total do PDV
-   * ficava R$ 8,00 abaixo do total real do pedido.
-   *
-   * Agora respeita o bairro: antes usava SEMPRE a taxa base, entao um bairro
-   * distante com taxa propria de R$ 12,00 era exibido como R$ 8,00 e o operador
-   * cobrava a menos do que o servidor registrava no pedido.
+   * entrega, e o bairro escolhido tem precedencia sobre a taxa base. Mostrar a
+   * base quando o bairro tem taxa propria faria o operador cobrar a menos.
    */
   const deliveryFee =
     orderType !== 'delivery'
       ? 0
       : selectedZone
         ? Number(selectedZone.fee) || 0
-        : Number(activeTenant?.deliveryFeeBase ?? 0) || 0;
+        : Number(activeTenant?.deliveryFeeBase ?? 0) || 0
 
-  const total = Math.max(0, subtotal + deliveryFee - discount);
+  const total = round2(Math.max(0, subtotal + deliveryFee - discount))
 
-  // ── Filtro de produtos ────────────────────────────────────────────────────
-  const filtered = products.filter((p) => {
-    // Mesmo helper das abas: comparar com `p.category` cru fazia a aba
-    // "Marmitas" nunca casar, porque a categoria real vem de `menuCategory`.
-    const matchCat = activeCategory === 'Todos' || productCategory(p) === activeCategory;
-    const matchSearch = !search || p.name.toLowerCase().includes(search.toLowerCase());
-    return matchCat && matchSearch && p.active;
-  });
+  // ── Manipular a comanda ───────────────────────────────────────────────────
 
-  // ── Submeter pedido ───────────────────────────────────────────────────────
-  async function submitOrder() {
-    if (cart.length === 0) return;
-    setSubmitting(true);
-    setSubmitError(null);
+  /**
+   * Ao tocar num produto: se ele tem proteina ou adicionais, abre o dialogo de
+   * montagem. Sem opcoes, entra direto na comanda — um toque, um item.
+   */
+  const pickProduct = useCallback((product: Product) => {
+    const needsDialog =
+      (product.comboOptions?.length ?? 0) > 0 || (product.addons?.length ?? 0) > 0
+
+    if (needsDialog) {
+      setItemDialog({ product, lineId: null })
+      return
+    }
+
+    setCart((prev) => {
+      // Mesmo produto sem observacao e sem adicionais: soma na linha existente
+      // em vez de repetir. A comanda com "Coca × 3" e mais legivel que tres
+      // linhas iguais, tanto na tela quanto na impressao.
+      const existing = prev.find(
+        (i) =>
+          i.product.id === product.id &&
+          !i.observations &&
+          i.addons.length === 0 &&
+          !i.selectedProtein,
+      )
+      if (existing) {
+        return prev.map((i) =>
+          i.lineId === existing.lineId ? { ...i, quantity: i.quantity + 1 } : i,
+        )
+      }
+      return [
+        ...prev,
+        {
+          lineId: newLineId(),
+          product,
+          quantity: 1,
+          observations: '',
+          selectedProtein: null,
+          addons: [],
+        },
+      ]
+    })
+  }, [])
+
+  function confirmItem(result: {
+    quantity: number
+    observations: string
+    selectedProtein: ComboOption | null
+    addons: ChosenAddon[]
+  }) {
+    if (!itemDialog) return
+    const { product, lineId } = itemDialog
+
+    setCart((prev) => {
+      if (lineId) {
+        return prev.map((i) => (i.lineId === lineId ? { ...i, ...result } : i))
+      }
+      return [...prev, { lineId: newLineId(), product, ...result }]
+    })
+    setItemDialog(null)
+  }
+
+  function changeQuantity(lineId: string, delta: number) {
+    setCart((prev) =>
+      prev.flatMap((item) => {
+        if (item.lineId !== lineId) return [item]
+        const next = item.quantity + delta
+        // Chegar a zero remove a linha: e o gesto esperado de quem aperta "−"
+        // repetidamente para tirar o item.
+        return next <= 0 ? [] : [{ ...item, quantity: next }]
+      }),
+    )
+  }
+
+  const resetSale = useCallback(() => {
+    setCart([])
+    setDiscount(0)
+    setOrderNotes('')
+    setPhone('')
+    setCustomer(null)
+    setDeliveryZone('')
+    setSubmitError(null)
+  }, [])
+
+  // ── Fechar a venda ────────────────────────────────────────────────────────
+  async function submitSale(splits: PaymentSplit[]) {
+    if (cart.length === 0) return
+    setSubmitting(true)
+    setSubmitError(null)
 
     const payload = {
-      items: cart.map((i) => ({
-        productId: i.product.id,
-        quantity: i.quantity,
-        unitPrice: Number(i.product.price),
-        observations: i.observations || null,
-        selectedProteinId: i.selectedProtein?.ingredientId || null,
-        selectedProteinName: i.selectedProtein?.label || null,
+      items: cart.map((item) => ({
+        productId: item.product.id,
+        quantity: item.quantity,
+        observations: item.observations || null,
+        selectedProteinId: item.selectedProtein?.ingredientId || null,
+        selectedProteinName: item.selectedProtein?.label || null,
+        // Os adicionais agora sao enviados: o backend ja sabia valida-los e
+        // congelar nome e preco, mas o PDV nunca os mandava — o cliente pagava
+        // o bacon extra que nunca chegava na cozinha.
+        addons: item.addons.map((a) => ({ addonId: a.addonId, quantity: a.quantity })),
       })),
-      customerId: customerMode === 'found' ? foundCustomer?.id : null,
-      newCustomer: customerMode === 'new' ? newCustomerForm : null,
+      customerId: customer?.id ?? null,
       orderType,
-      paymentMethod,
+      // Pagamento misto: uma entrada por forma usada.
+      payments: splits.map((s) => ({
+        method: s.method,
+        amount: round2(s.amount),
+        changeFor: s.method === 'cash' && s.changeFor != null ? round2(s.changeFor) : null,
+      })),
       discount,
-      // Faltava enviar: sem `deliveryZone` o backend caia sempre na taxa base,
-      // e o bairro cadastrado com taxa propria nunca era cobrado.
-      deliveryZone: orderType === 'delivery' ? deliveryZone || null : null,
-      observations: orderObservations || null,
-    };
+      deliveryZone: orderType === 'delivery' ? deliveryZone.trim() || null : null,
+      observations: orderNotes.trim() || null,
+    }
 
     try {
-      // Este era o fetch mais critico do sistema: ia com o token da chave errada
-      // (`token`), entao a venda falhava com 401 e o operador via apenas um
-      // alert genarico "Tente novamente" — sem saber que a sessao era o problema.
-      const order = await apiPost<OrderResponse>('/api/orders', payload);
-      setLastOrder(order);
+      const order = await apiPost<OrderResponse>('/api/orders', payload)
 
-      // A impressao agora roda sempre: era condicionada a `isElectron`, que
-      // ficou permanentemente falso quando o Electron saiu do projeto — a
-      // cozinha nunca recebia a comanda. Passa pelo dialogo do navegador.
-      const printItems = cart.map((i) => ({
-        productName: i.product.name,
-        quantity: i.quantity,
-        observations: i.observations || undefined,
-        selectedProteinName: i.selectedProtein?.label || undefined,
-      }));
+      // Troco a mostrar na confirmacao: so a parcela em especie gera troco.
+      const cashSplit = splits.find((s) => s.method === 'cash')
+      const change =
+        cashSplit?.changeFor != null ? round2(Math.max(0, cashSplit.changeFor - cashSplit.amount)) : 0
+
+      // ── Impressao ────────────────────────────────────────────────────────
+      const printItems = cart.map((item) => ({
+        productName: item.product.name,
+        quantity: item.quantity,
+        observations: item.observations || undefined,
+        selectedProteinName: item.selectedProtein?.label || undefined,
+        // Os adicionais precisam sair na comanda da cozinha, senao o bacon
+        // extra e cobrado e nao e produzido.
+        addons: item.addons.map((a) => ({ name: a.name, quantity: a.quantity })),
+      }))
 
       const kitchen = await printKitchen({
         orderNumber: order.orderNumber,
         orderType: order.orderType,
         items: printItems,
-        observations: orderObservations || undefined,
+        observations: orderNotes || undefined,
         createdAt: order.createdAt,
-      });
+      })
 
-      let delivery: { success: boolean } = { success: true };
+      let delivery: { success: boolean } = { success: true }
       if (orderType === 'delivery') {
-        const customer = foundCustomer || order.customer;
+        const target = customer ?? order.customer
         delivery = await printDelivery({
           orderNumber: order.orderNumber,
-          customerName: customer?.name || 'Balcao',
-          customerPhone: customer?.phone || '',
-          address: customer?.address || newCustomerForm.address || '',
+          customerName: target?.name || 'Balcão',
+          customerPhone: target?.phone || '',
+          address: target?.address || '',
           items: printItems,
-          // `order.totalAmount` do servidor, nao o `total` local: o servidor e
-          // a autoridade sobre o valor, e a comanda vai na mao do entregador.
+          // Total do SERVIDOR: ele e a autoridade, e essa via vai na mao do
+          // entregador receber o dinheiro.
           totalAmount: Number(order.totalAmount) || total,
           deliveryFee,
-          paymentMethod,
-          observations: orderObservations || undefined,
+          paymentMethod: splits[0]?.method ?? 'cash',
+          observations: orderNotes || undefined,
           createdAt: order.createdAt,
-        });
+        })
       }
 
-      // O pedido ja esta salvo; falha de impressao nao invalida a venda, mas o
-      // operador precisa saber para reimprimir em vez de a cozinha ficar sem.
-      setPrintWarning(
-        kitchen.success && delivery.success
-          ? null
-          : 'Pedido salvo, mas a impressao falhou. Use "Reimprimir".',
-      );
-
-      // Snapshot para o "Reimprimir": o carrinho e limpo logo abaixo, entao sem
-      // guardar os itens agora a reimpressao sairia vazia.
-      setLastPrint({
-        kitchen: {
-          orderNumber: order.orderNumber,
-          orderType: order.orderType,
-          items: printItems,
-          observations: orderObservations || undefined,
-          createdAt: order.createdAt,
-        },
-        delivery:
-          orderType === 'delivery'
-            ? {
-                orderNumber: order.orderNumber,
-                customerName: (foundCustomer || order.customer)?.name || 'Balcao',
-                customerPhone: (foundCustomer || order.customer)?.phone || '',
-                address:
-                  (foundCustomer || order.customer)?.address || newCustomerForm.address || '',
-                items: printItems,
-                totalAmount: Number(order.totalAmount) || total,
-                deliveryFee,
-                paymentMethod,
-                observations: orderObservations || undefined,
-                createdAt: order.createdAt,
-              }
-            : null,
-      });
-
-      // Resetar estado
-      setCart([]);
-      setDiscount(0);
-      setOrderObservations('');
-      setFoundCustomer(null);
-      setCustomerSearch('');
-      setNewCustomerForm({ name: '', phone: '', address: '', neighborhood: '', city: '' });
-      // Zera o bairro: mantido, o proximo pedido herdaria a taxa do anterior e
-      // um cliente do centro pagaria a taxa do bairro distante.
-      setDeliveryZone('');
-      setCustomerMode('search');
-      setCheckoutModal(false);
-      setSuccessModal(true);
+      setLastSale({
+        order,
+        change,
+        printFailed: !kitchen.success || !delivery.success,
+      })
+      setPayOpen(false)
+      resetSale()
+      // O turno mudou (entrou venda): atualiza o resumo do caixa no topo.
+      void cash.reload()
     } catch (err) {
-      // `alert` bloqueia o operador e nao diz o motivo. A mensagem real da API
-      // ("estoque insuficiente de Frango", "escolha a proteina") aparece agora
-      // dentro do modal de checkout, com o carrinho preservado para corrigir.
-      setSubmitError(errorMessage(err, 'Nao foi possivel finalizar o pedido.'));
+      setSubmitError(errorMessage(err, 'Não foi possível registrar a venda.'))
     } finally {
-      setSubmitting(false);
+      setSubmitting(false)
     }
   }
 
-  /** Reimprime a ultima comanda a partir do snapshot salvo na venda. */
-  async function reprintLastOrder() {
-    if (!lastPrint) return;
-    const kitchen = await printKitchen(lastPrint.kitchen);
-    const delivery = lastPrint.delivery
-      ? await printDelivery(lastPrint.delivery)
-      : { success: true };
-    setPrintWarning(
-      kitchen.success && delivery.success ? null : 'A impressao falhou novamente.',
-    );
-  }
+  // ── Atalhos de teclado ────────────────────────────────────────────────────
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      // Nao sequestra o teclado enquanto um dialogo esta aberto: ali o Esc e o
+      // Enter pertencem ao dialogo.
+      if (itemDialog || payOpen) return
 
-  // ── Render ────────────────────────────────────────────────────────────────
+      if (event.key === 'F2') {
+        event.preventDefault()
+        searchRef.current?.focus()
+        searchRef.current?.select()
+        return
+      }
+      if (event.key === 'F4') {
+        event.preventDefault()
+        if (cart.length > 0 && cash.isOpen) setPayOpen(true)
+        return
+      }
+      if (event.key === 'Escape') {
+        // Esc no campo de busca limpa a busca; fora dele, fecha a confirmacao.
+        if (document.activeElement === searchRef.current && search) {
+          setSearch('')
+          return
+        }
+        setLastSale(null)
+      }
+    }
+
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [cart.length, cash.isOpen, itemDialog, payOpen, search])
+
+  // ── Estados de bloqueio ───────────���───────────────────────────────────────
+
+  const editingItem = itemDialog?.lineId
+    ? (cart.find((i) => i.lineId === itemDialog.lineId) ?? null)
+    : null
 
   return (
-    <div style={styles.container}>
-      {/* ── Coluna esquerda: Catálogo ───────────────────────────────────── */}
-      <div style={styles.catalog}>
-        {/* Barra superior */}
-        <div style={styles.catalogHeader}>
-          <div style={styles.orderTypeToggle}>
-            {(['delivery', 'balcao'] as OrderType[]).map((t) => (
+    // Area de trabalho CLARA e cromo ESCURO, como manda o tema do sistema (ver
+    // index.css): a tela e operada sob a luz forte de uma cozinha, onde fundo
+    // escuro reflete e cansa. So a barra superior e escura, para separar
+    // "navegacao" de "operacao" sem precisar de moldura decorativa.
+    <div className="flex h-screen flex-col overflow-hidden bg-canvas">
+      {/* ── Barra superior ─────────────────────────────────────────────── */}
+      <header className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 bg-ink px-4 py-2.5">
+        <div className="flex items-center gap-2.5">
+          <span
+            aria-hidden="true"
+            className="flex h-8 w-8 items-center justify-center rounded-md bg-brand font-mono text-sm font-bold text-white"
+          >
+            D
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-white">
+              {activeTenant?.name ?? 'PDV'}
+            </p>
+            <p className="text-[0.6875rem] text-white/40">
+              {user?.firstName} {user?.lastName}
+            </p>
+          </div>
+        </div>
+
+        {/* Tipo de pedido: define taxa de entrega e o que a comanda imprime */}
+        <div
+          role="group"
+          aria-label="Tipo de pedido"
+          className="flex gap-1 rounded-md bg-ink-soft p-1"
+        >
+          {(['balcao', 'retirada', 'delivery'] as OrderType[]).map((type) => {
+            const active = orderType === type
+            const Icon = type === 'delivery' ? Bike : type === 'retirada' ? ShoppingBag : Store
+            return (
               <button
-                key={t}
-                style={{ ...styles.typeBtn, ...(orderType === t ? styles.typeBtnActive : {}) }}
-                onClick={() => setOrderType(t)}
+                key={type}
+                type="button"
+                onClick={() => setOrderType(type)}
+                aria-pressed={active}
+                className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                  active ? 'bg-brand text-white' : 'text-white/60 hover:text-white'
+                }`}
               >
-                {t === 'delivery' ? 'Delivery' : 'Balcao'}
+                <Icon aria-hidden="true" className="h-3.5 w-3.5" />
+                {ORDER_TYPE_LABELS[type]}
               </button>
-            ))}
-          </div>
-          <input
-            style={styles.searchInput}
-            placeholder="Buscar produto..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+            )
+          })}
         </div>
 
-        {/* Categorias */}
-        <div style={styles.categoryBar}>
-          {categories.map((cat) => (
-            <button
-              key={cat}
-              style={{
-                ...styles.catBtn,
-                ...(activeCategory === cat ? styles.catBtnActive : {}),
-              }}
-              onClick={() => setActiveCategory(cat)}
-            >
-              {cat}
-            </button>
-          ))}
-        </div>
+        <div className="ml-auto flex items-center gap-3">
+          {/* Conexao em tempo real: se cair, o operador precisa saber */}
+          <span
+            title={liveStatus === 'connected' ? 'Conectado' : 'Sem conexão em tempo real'}
+            className="flex items-center gap-1.5 text-xs font-medium"
+          >
+            {liveStatus === 'connected' ? (
+              <Wifi aria-hidden="true" className="h-3.5 w-3.5 text-good" />
+            ) : (
+              <WifiOff aria-hidden="true" className="h-3.5 w-3.5 text-warn" />
+            )}
+            <span className="sr-only">
+              {liveStatus === 'connected' ? 'Conectado' : 'Sem conexão'}
+            </span>
+          </span>
 
-        {/* Grid de produtos */}
-        {loadingProducts ? (
-          <div style={styles.centerMsg}>Carregando produtos...</div>
-        ) : productsError ? (
-          // Uma falha de catalogo trava a venda, entao ela precisa aparecer com
-          // o motivo e um retry — nao virar um "nenhum produto encontrado".
-          <div style={styles.centerMsg}>
-            <div>{productsError}</div>
-            <button
-              type="button"
-              style={styles.retryBtn}
-              onClick={() => setReloadKey((k) => k + 1)}
+          {/* Estado do caixa: a informacao que decide se ha venda ou nao */}
+          {cash.isOpen ? (
+            <Link
+              to="/caixa"
+              className="flex items-center gap-2 rounded-md bg-good/15 px-2.5 py-1.5 text-xs font-semibold text-good transition-colors hover:bg-good/25"
             >
-              Tentar de novo
-            </button>
-          </div>
-        ) : (
-          <div style={styles.productGrid}>
-            {filtered.map((p) => (
-              <button
-                key={p.id}
-                style={styles.productCard}
-                onClick={() => addToCart(p)}
+              <span className="h-1.5 w-1.5 rounded-full bg-good" aria-hidden="true" />
+              Caixa aberto
+              {cash.summary && (
+                <span className="font-mono tabular-nums opacity-80">
+                  {brl(cash.summary.expectedCash)}
+                </span>
+              )}
+            </Link>
+          ) : (
+            <span className="flex items-center gap-1.5 rounded-md bg-bad/15 px-2.5 py-1.5 text-xs font-semibold text-bad">
+              <Lock aria-hidden="true" className="h-3 w-3" />
+              Caixa fechado
+            </span>
+          )}
+
+          <button
+            type="button"
+            onClick={logout}
+            aria-label="Sair do sistema"
+            title="Sair"
+            className="rounded-md p-1.5 text-white/40 transition-colors hover:bg-white/10 hover:text-white"
+          >
+            <LogOut aria-hidden="true" className="h-4 w-4" />
+          </button>
+        </div>
+      </header>
+
+      {/* ── Corpo ──────────────────────────────────────────────────────── */}
+      {!cash.isOpen && !cash.isLoading ? (
+        // Bloqueio: sem turno aberto nao ha venda. Avisar aqui, antes de o
+        // operador montar a comanda, evita o trabalho perdido.
+        <div className="flex flex-1 items-center justify-center p-6">
+          <div className="flex max-w-md flex-col items-center gap-4 text-center">
+            <span
+              aria-hidden="true"
+              className="flex h-14 w-14 items-center justify-center rounded-full bg-bad/15"
+            >
+              <Lock className="h-6 w-6 text-bad" />
+            </span>
+            <div>
+              <h2 className="text-lg font-semibold text-ink">O caixa está fechado</h2>
+              <p className="mt-1.5 text-sm text-slate">
+                Toda venda precisa pertencer a um turno de caixa, para que o fechamento confira
+                com o dinheiro na gaveta. Abra o caixa para começar a vender.
+              </p>
+            </div>
+            {can('cash:operate') ? (
+              <Link
+                to="/caixa"
+                className="rounded-md bg-brand px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-brand-strong"
               >
-                <div
-                  style={{
-                    ...styles.productCategoryBar,
-                    background: CATEGORY_COLORS[productCategory(p)] || 'var(--color-slate)',
-                  }}
-                />
-                <div style={styles.productName}>{p.name}</div>
-                {p.productType === 'combo' && (
-                  <div style={styles.comboBadge}>COMBO</div>
-                )}
-                <div style={styles.productPrice}>
-                  R$ {Number(p.price).toFixed(2).replace('.', ',')}
-                </div>
-              </button>
-            ))}
-            {filtered.length === 0 && (
-              <div style={styles.centerMsg}>Nenhum produto encontrado</div>
+                Abrir o caixa
+              </Link>
+            ) : (
+              <p className="text-xs text-slate">
+                Peça ao gerente para abrir o caixa: seu acesso não permite esta ação.
+              </p>
             )}
           </div>
-        )}
-      </div>
-
-      {/* ── Coluna direita: Carrinho ──────────────────────────────────────── */}
-      <div style={styles.cart}>
-        <div style={styles.cartHeader}>
-          <span style={styles.cartTitle}>Pedido</span>
-          {cart.length > 0 && (
-            <button style={styles.clearBtn} onClick={() => setCart([])}>
-              Limpar
-            </button>
-          )}
         </div>
-
-        {/* Cliente */}
-        {orderType === 'delivery' && (
-          <div style={styles.customerSection}>
-            {customerMode === 'search' && (
-              <div style={styles.inputRow}>
-                <input
-                  style={styles.customerInput}
-                  placeholder="Telefone do cliente..."
-                  value={customerSearch}
-                  onChange={(e) => setCustomerSearch(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') searchCustomer(customerSearch);
-                  }}
-                />
-                <button
-                  style={styles.searchBtn}
-                  onClick={() => searchCustomer(customerSearch)}
-                >
-                  Buscar
-                </button>
-              </div>
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+          {/* Produtos */}
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            {productsError && (
+              <p
+                role="alert"
+                className="flex items-center gap-2 bg-bad/15 px-4 py-2.5 text-sm font-medium text-bad"
+              >
+                <AlertTriangle aria-hidden="true" className="h-4 w-4 shrink-0" />
+                {productsError}
+              </p>
             )}
 
-            {customerMode === 'found' && foundCustomer && (
-              <div style={styles.customerCard}>
-                <div style={styles.customerInfo}>
-                  <strong>{foundCustomer.name}</strong>
-                  <span>{foundCustomer.phone}</span>
-                  <span style={styles.ltvBadge}>
-                    LTV: R$ {Number(foundCustomer.ltv).toFixed(2)} | {foundCustomer.totalOrders} pedidos
-                  </span>
-                </div>
-                <button
-                  style={styles.changeBtn}
-                  onClick={() => { setFoundCustomer(null); setCustomerMode('search'); setCustomerSearch(''); }}
-                >
-                  Trocar
-                </button>
-              </div>
-            )}
-
-            {customerMode === 'new' && (
-              <div style={styles.newCustomerForm}>
-                <div style={styles.newCustomerLabel}>Novo cliente</div>
-                <input
-                  style={styles.formInput}
-                  placeholder="Nome *"
-                  value={newCustomerForm.name}
-                  onChange={(e) => setNewCustomerForm((f) => ({ ...f, name: e.target.value }))}
-                />
-                <input
-                  style={styles.formInput}
-                  placeholder="Telefone *"
-                  value={newCustomerForm.phone}
-                  onChange={(e) => setNewCustomerForm((f) => ({ ...f, phone: e.target.value }))}
-                />
-                <input
-                  style={styles.formInput}
-                  placeholder="Endereco"
-                  value={newCustomerForm.address}
-                  onChange={(e) => setNewCustomerForm((f) => ({ ...f, address: e.target.value }))}
-                />
-                {/* Bairro do cadastro fica em sincronia com o seletor de taxa:
-                    digitar o bairro aqui ja seleciona a zona, e vice-versa.
-                    Dois campos independentes divergiriam, e o endereco impresso
-                    apontaria um bairro diferente do que foi cobrado. */}
-                {/* Sugere os bairros cadastrados sem impedir digitar um novo:
-                    a loja atende endereco fora da lista pela taxa padrao. */}
-                <datalist id="pdv-zones">
-                  {zones.map((z) => (
-                    <option key={z.name} value={z.name} />
-                  ))}
-                </datalist>
-                <input
-                  style={styles.formInput}
-                  placeholder="Bairro"
-                  list="pdv-zones"
-                  value={newCustomerForm.neighborhood}
-                  onChange={(e) => {
-                    setNewCustomerForm((f) => ({ ...f, neighborhood: e.target.value }));
-                    setDeliveryZone(e.target.value);
-                  }}
-                />
-                <input
-                  style={styles.formInput}
-                  placeholder="Cidade"
-                  value={newCustomerForm.city}
-                  onChange={(e) => setNewCustomerForm((f) => ({ ...f, city: e.target.value }))}
-                />
-                <button
-                  style={styles.changeBtn}
-                  onClick={() => { setCustomerMode('search'); setCustomerSearch(''); }}
-                >
-                  Cancelar
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Itens do carrinho */}
-        <div style={styles.cartItems}>
-          {cart.length === 0 && (
-            <div style={styles.emptyCart}>Adicione produtos ao pedido</div>
-          )}
-          {cart.map((item, idx) => (
-            <div key={`${item.product.id}-${idx}`} style={styles.cartItem}>
-              <div style={styles.cartItemInfo}>
-                <span style={styles.cartItemName}>{item.product.name}</span>
-                {item.selectedProtein && (
-                  <span style={styles.cartItemProtein}>
-                    {item.selectedProtein.label}
-                  </span>
-                )}
-                <input
-                  style={styles.obsInput}
-                  placeholder="Obs..."
-                  value={item.observations}
-                  onChange={(e) => {
-                    const next = [...cart];
-                    next[idx] = { ...item, observations: e.target.value };
-                    setCart(next);
-                  }}
-                />
-              </div>
-              <div style={styles.cartItemControls}>
-                <button style={styles.qtyBtn} onClick={() => updateQty(idx, -1)}>-</button>
-                <span style={styles.qtyDisplay}>{item.quantity}</span>
-                <button style={styles.qtyBtn} onClick={() => updateQty(idx, 1)}>+</button>
-                <span style={styles.itemSubtotal}>
-                  R$ {(Number(item.product.price) * item.quantity).toFixed(2).replace('.', ',')}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Totais e finalização */}
-        {cart.length > 0 && (
-          <div style={styles.cartFooter}>
-            <div style={styles.totalRow}>
-              <span>Subtotal</span>
-              <span>R$ {subtotal.toFixed(2).replace('.', ',')}</span>
-            </div>
-            {/* Seletor de bairro: e ele que define a taxa. Fica junto dos totais
-                de propósito — o operador precisa ver o valor mudar ao escolher. */}
-            {orderType === 'delivery' && (
-              <div style={styles.zoneRow}>
-                <label htmlFor="pdv-zone" style={styles.zoneLabel}>
-                  Bairro
-                </label>
-                <select
-                  id="pdv-zone"
-                  style={styles.zoneSelect}
-                  value={selectedZone ? selectedZone.name : ''}
-                  onChange={(e) => {
-                    setDeliveryZone(e.target.value);
-                    // Mantem o cadastro alinhado com a zona cobrada.
-                    if (e.target.value) {
-                      setNewCustomerForm((f) => ({ ...f, neighborhood: e.target.value }));
-                    }
-                  }}
-                >
-                  <option value="">
-                    {zones.length === 0
-                      ? 'Sem bairros cadastrados — taxa padrão'
-                      : 'Outro bairro — taxa padrão'}
-                  </option>
-                  {zones.map((z) => (
-                    <option key={z.name} value={z.name}>
-                      {z.name} — R$ {Number(z.fee).toFixed(2).replace('.', ',')}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-            {deliveryFee > 0 && (
-              <div style={styles.totalRow}>
-                <span>
-                  Taxa de entrega
-                  {selectedZone ? ` (${selectedZone.name})` : ' (padrão)'}
-                </span>
-                <span>R$ {deliveryFee.toFixed(2).replace('.', ',')}</span>
-              </div>
-            )}
-            {/* Pedido minimo do bairro: avisa, mas nao trava — quem decide abrir
-                excecao e o balcao, nao a interface. */}
-            {selectedZone && selectedZone.minOrder > 0 && subtotal < selectedZone.minOrder && (
-              <div style={styles.zoneWarning} role="alert">
-                Pedido mínimo de {selectedZone.name}: R${' '}
-                {Number(selectedZone.minOrder).toFixed(2).replace('.', ',')}
-              </div>
-            )}
-            <div style={styles.totalRow}>
-              <span>Desconto</span>
-              <input
-                style={styles.discountInput}
-                type="number"
-                min="0"
-                max={subtotal + deliveryFee}
-                step="0.50"
-                value={discount}
-                onChange={(e) =>
-                  setDiscount(
-                    Math.max(0, Math.min(Number(e.target.value) || 0, subtotal + deliveryFee)),
-                  )
-                }
-              />
-            </div>
-            <div style={{ ...styles.totalRow, ...styles.totalFinal }}>
-              <span>TOTAL</span>
-              <span>R$ {total.toFixed(2).replace('.', ',')}</span>
-            </div>
-
-            <div style={styles.paymentMethods}>
-              {(Object.keys(PAYMENT_LABELS) as PaymentMethod[]).map((m) => (
-                <button
-                  key={m}
-                  style={{
-                    ...styles.payBtn,
-                    ...(paymentMethod === m ? styles.payBtnActive : {}),
-                  }}
-                  onClick={() => setPaymentMethod(m)}
-                >
-                  {PAYMENT_LABELS[m]}
-                </button>
-              ))}
-            </div>
-
-            <textarea
-              style={styles.obsTextarea}
-              placeholder="Observacoes gerais..."
-              value={orderObservations}
-              onChange={(e) => setOrderObservations(e.target.value)}
-              rows={2}
+            <ProductGrid
+              products={filtered}
+              categories={categories}
+              activeCategory={activeCategory}
+              search={search}
+              loading={loadingProducts}
+              onSearchChange={setSearch}
+              onCategoryChange={setActiveCategory}
+              onPick={pickProduct}
+              searchRef={searchRef}
             />
 
-            <button
-              style={styles.checkoutBtn}
-              onClick={() => setCheckoutModal(true)}
+            {/* Barra de cliente, entrega e desconto */}
+            <div className="shrink-0 border-t border-line bg-surface px-4 py-3">
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="flex min-w-40 flex-col gap-1">
+                  <span className="flex items-center gap-1.5 text-[0.6875rem] font-semibold tracking-wide text-slate uppercase">
+                    <User aria-hidden="true" className="h-3 w-3" />
+                    Telefone do cliente
+                  </span>
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="Opcional"
+                    className="rounded-md border border-line bg-surface px-3 py-2 font-mono text-sm tabular-nums text-ink focus:border-brand focus:outline-none"
+                  />
+                </label>
+
+                {/* Resultado da busca de cliente */}
+                {searchingCustomer ? (
+                  <span className="pb-2 text-xs text-slate">Procurando...</span>
+                ) : customer ? (
+                  <div className="pb-1">
+                    <p className="text-sm font-medium text-ink">{customer.name}</p>
+                    <p className="text-xs text-slate">
+                      {customer.totalOrders} pedido{customer.totalOrders === 1 ? '' : 's'}
+                      {customer.neighborhood && ` · ${customer.neighborhood}`}
+                    </p>
+                  </div>
+                ) : phone.replace(/\D/g, '').length >= 8 ? (
+                  <span className="pb-2 text-xs text-warn">Cliente novo (não cadastrado)</span>
+                ) : null}
+
+                {/* Bairro: define a taxa. So aparece em entrega. */}
+                {orderType === 'delivery' && (
+                  <label className="flex min-w-44 flex-col gap-1">
+                    <span className="text-[0.6875rem] font-semibold tracking-wide text-slate uppercase">
+                      Bairro da entrega
+                    </span>
+                    {zones.length > 0 ? (
+                      <select
+                        value={deliveryZone}
+                        onChange={(e) => setDeliveryZone(e.target.value)}
+                        className="rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink focus:border-brand focus:outline-none"
+                      >
+                        <option value="">Taxa base · {brl(Number(activeTenant?.deliveryFeeBase ?? 0))}</option>
+                        {zones.map((zone) => (
+                          <option key={zone.name} value={zone.name}>
+                            {zone.name} · {brl(Number(zone.fee) || 0)}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={deliveryZone}
+                        onChange={(e) => setDeliveryZone(e.target.value)}
+                        placeholder="Nenhum bairro cadastrado"
+                        className="rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink focus:border-brand focus:outline-none"
+                      />
+                    )}
+                  </label>
+                )}
+
+                <label className="flex w-28 flex-col gap-1">
+                  <span className="flex items-center gap-1.5 text-[0.6875rem] font-semibold tracking-wide text-slate uppercase">
+                    <Percent aria-hidden="true" className="h-3 w-3" />
+                    Desconto
+                  </span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    step="0.01"
+                    value={discount || ''}
+                    onChange={(e) => setDiscount(Math.max(0, Number(e.target.value)))}
+                    placeholder="0,00"
+                    className="rounded-md border border-line bg-surface px-3 py-2 font-mono text-sm tabular-nums text-ink focus:border-brand focus:outline-none"
+                  />
+                </label>
+
+                <label className="flex min-w-48 flex-1 flex-col gap-1">
+                  <span className="text-[0.6875rem] font-semibold tracking-wide text-slate uppercase">
+                    Observação do pedido
+                  </span>
+                  <input
+                    type="text"
+                    value={orderNotes}
+                    onChange={(e) => setOrderNotes(e.target.value)}
+                    placeholder="Ex: entregar no portão dos fundos"
+                    className="rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink focus:border-brand focus:outline-none"
+                  />
+                </label>
+              </div>
+            </div>
+          </div>
+
+          {/* Comanda */}
+          <CartPanel
+            items={cart}
+            subtotal={subtotal}
+            deliveryFee={deliveryFee}
+            discount={discount}
+            total={total}
+            disabled={!cash.isOpen}
+            onChangeQuantity={changeQuantity}
+            onRemove={(lineId) => setCart((prev) => prev.filter((i) => i.lineId !== lineId))}
+            onEdit={(lineId) => {
+              const item = cart.find((i) => i.lineId === lineId)
+              if (item) setItemDialog({ product: item.product, lineId })
+            }}
+            onClear={resetSale}
+            onCheckout={() => setPayOpen(true)}
+          />
+        </div>
+      )}
+
+      {/* ── Dialogos ───────────────────────────────────────────────────── */}
+      {itemDialog && (
+        <ItemDialog
+          product={itemDialog.product}
+          initial={
+            editingItem
+              ? {
+                  quantity: editingItem.quantity,
+                  observations: editingItem.observations,
+                  selectedProtein: editingItem.selectedProtein,
+                  addons: editingItem.addons,
+                }
+              : undefined
+          }
+          onCancel={() => setItemDialog(null)}
+          onConfirm={confirmItem}
+        />
+      )}
+
+      {payOpen && (
+        <PaymentDialog
+          total={total}
+          submitting={submitting}
+          error={submitError}
+          onCancel={() => {
+            setPayOpen(false)
+            setSubmitError(null)
+          }}
+          onConfirm={submitSale}
+        />
+      )}
+
+      {/* Confirmacao da venda */}
+      {lastSale && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="done-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/85 p-6 backdrop-blur-sm"
+        >
+          <div className="flex w-full max-w-sm flex-col items-center gap-4 rounded-2xl bg-surface p-6 text-center shadow-2xl">
+            <span
+              aria-hidden="true"
+              className="flex h-14 w-14 items-center justify-center rounded-full bg-good-soft"
             >
-              Finalizar Pedido
-            </button>
-          </div>
-        )}
-      </div>
+              <CheckCircle2 className="h-7 w-7 text-good" />
+            </span>
+            <div>
+              <h2 id="done-title" className="text-lg font-semibold text-ink">
+                Venda registrada
+              </h2>
+              <p className="mt-1 text-sm text-slate">
+                Pedido <span className="font-mono font-semibold">#{lastSale.order.orderNumber}</span>{' '}
+                · {brl(Number(lastSale.order.totalAmount) || 0)}
+              </p>
+            </div>
 
-      {/* ── Modal: Seletor de proteina do Combo ──��──────────────────────── */}
-      {comboModal && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modal}>
-            <div style={styles.modalTitle}>
-              Escolha a proteina — {comboModal.product.name}
-            </div>
-            <div style={styles.comboOptions}>
-              {comboModal.product.comboOptions
-                ?.filter((o) => o.group === 'proteina')
-                .map((opt) => (
-                  <button
-                    key={opt.ingredientId}
-                    style={styles.comboOptionBtn}
-                    onClick={() => confirmCombo(opt)}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-            </div>
-            <button style={styles.cancelBtn} onClick={() => setComboModal(null)}>
-              Cancelar
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Modal: Confirmacao de checkout ───────────────────────────────── */}
-      {checkoutModal && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modal}>
-            <div style={styles.modalTitle}>Confirmar Pedido</div>
-            <div style={styles.confirmSummary}>
-              <div><strong>Tipo:</strong> {orderType === 'delivery' ? 'Delivery' : 'Balcao'}</div>
-              <div><strong>Itens:</strong> {cart.reduce((a, i) => a + i.quantity, 0)}</div>
-              <div><strong>Total:</strong> R$ {total.toFixed(2).replace('.', ',')}</div>
-              <div><strong>Pagamento:</strong> {PAYMENT_LABELS[paymentMethod]}</div>
-              {deliveryFee > 0 && (
-                <div><strong>Taxa de entrega:</strong> R$ {deliveryFee.toFixed(2).replace('.', ',')}</div>
-              )}
-              <div style={styles.printNote}>
-                Imprime: Cozinha{orderType === 'delivery' ? ' + Entregador' : ''} ({paperWidth})
-              </div>
-            </div>
-            {submitError && (
-              <div style={styles.modalError} role="alert">
-                {submitError}
+            {/* Troco em destaque: e a ultima coisa que falta fazer */}
+            {lastSale.change > 0 && (
+              <div className="w-full rounded-card bg-brand-soft px-4 py-3">
+                <p className="text-xs font-semibold tracking-wide text-brand-strong uppercase">
+                  Troco a devolver
+                </p>
+                <p className="font-mono text-3xl font-bold tabular-nums text-brand-strong">
+                  {brl(lastSale.change)}
+                </p>
               </div>
             )}
-            <div style={styles.modalActions}>
-              <button
-                style={styles.confirmBtn}
-                disabled={submitting}
-                onClick={submitOrder}
-              >
-                {submitting ? 'Processando...' : 'Confirmar'}
-              </button>
-              <button
-                style={styles.cancelBtn}
-                onClick={() => setCheckoutModal(false)}
-              >
-                Voltar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* ── Modal: Pedido criado com sucesso ─────────────────────────────── */}
-      {successModal && lastOrder && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modal}>
-            <div style={styles.successIcon}>OK</div>
-            <div style={styles.modalTitle}>Pedido Criado!</div>
-            <div style={styles.confirmSummary}>
-              <div><strong>Numero:</strong> #{lastOrder.orderNumber}</div>
-              <div><strong>Total:</strong> R$ {Number(lastOrder.totalAmount).toFixed(2).replace('.', ',')}</div>
-            </div>
-            {printWarning && (
-              <div style={styles.modalError} role="alert">
-                {printWarning}
-              </div>
+            {lastSale.printFailed && (
+              <p className="flex items-start gap-2 rounded-md bg-warn-soft px-3 py-2 text-xs font-medium text-warn">
+                <Printer aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                A venda foi salva, mas a impressão falhou. Reimprima pela tela de pedidos.
+              </p>
             )}
-            <div style={styles.modalActions}>
-              <button style={styles.confirmBtn} onClick={() => setSuccessModal(false)}>
-                Novo Pedido
-              </button>
-              {/* Reimprimir a partir do snapshot do pedido: papel enroscado ou
-                  dialogo cancelado por engano nao pode custar a comanda. */}
-              <button style={styles.cancelBtn} onClick={reprintLastOrder}>
-                Reimprimir
-              </button>
-            </div>
+
+            <button
+              type="button"
+              onClick={() => setLastSale(null)}
+              autoFocus
+              className="w-full rounded-md bg-brand py-3 text-base font-semibold text-white transition-colors hover:bg-brand-strong"
+            >
+              Nova venda
+            </button>
           </div>
         </div>
       )}
     </div>
-  );
+  )
 }
-
-// ─── Estilos inline (sem CSS externo, conforme regra da fase) ─────────────────
-
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    display: 'flex', height: '100vh', background: '#1a1a2e', color: '#e0e0e0',
-    fontFamily: 'monospace', overflow: 'hidden',
-  },
-  catalog: {
-    flex: 1, display: 'flex', flexDirection: 'column', borderRight: '2px solid #333',
-    overflow: 'hidden',
-  },
-  catalogHeader: {
-    display: 'flex', gap: 8, padding: '10px 12px', background: '#16213e',
-    borderBottom: '1px solid #333', alignItems: 'center', flexShrink: 0,
-  },
-  orderTypeToggle: { display: 'flex', gap: 4 },
-  typeBtn: {
-    padding: '6px 14px', background: '#2a2a4a', border: '1px solid #555',
-    color: '#aaa', cursor: 'pointer', borderRadius: 4, fontSize: 13,
-  },
-  typeBtnActive: { background: '#0f3460', color: '#fff', borderColor: '#4a90e2' },
-  searchInput: {
-    flex: 1, padding: '6px 10px', background: '#2a2a4a', border: '1px solid #555',
-    color: '#fff', borderRadius: 4, fontSize: 13,
-  },
-  categoryBar: {
-    display: 'flex', gap: 6, padding: '8px 12px', overflowX: 'auto',
-    background: '#16213e', borderBottom: '1px solid #333', flexShrink: 0,
-  },
-  catBtn: {
-    padding: '4px 12px', background: '#2a2a4a', border: '1px solid #444',
-    color: '#aaa', cursor: 'pointer', borderRadius: 3, fontSize: 12,
-    whiteSpace: 'nowrap',
-  },
-  catBtnActive: { background: '#e74c3c', color: '#fff', borderColor: '#e74c3c' },
-  productGrid: {
-    display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
-    gap: 8, padding: 12, overflowY: 'auto', flex: 1,
-    // `alignContent: start` e o que conserta os cards gigantes: o grid e um
-    // filho `flex: 1`, entao por padrao ele distribuia a altura sobrando entre
-    // as linhas — com 3 produtos, cada card ocupava a tela inteira e o preco
-    // (que usa `marginTop: auto`) ia parar longe do nome, fora da area visivel.
-    alignContent: 'start',
-  },
-  productCard: {
-    background: '#16213e', border: '1px solid #333', borderRadius: 6,
-    cursor: 'pointer', padding: '10px 8px', textAlign: 'left',
-    display: 'flex', flexDirection: 'column', gap: 4, position: 'relative',
-    transition: 'border-color 0.15s',
-    // Altura minima uniforme para a grade nao ficar irregular quando um nome
-    // ocupa duas linhas e o vizinho apenas uma.
-    minHeight: 96,
-  },
-  productCategoryBar: { height: 3, borderRadius: 2, marginBottom: 4 },
-  productName: { fontSize: 13, fontWeight: 'bold', color: '#e0e0e0', lineHeight: 1.3 },
-  productPrice: { fontSize: 14, color: '#4ade80', fontWeight: 'bold', marginTop: 'auto' },
-  comboBadge: {
-    fontSize: 10, background: '#e67e22', color: '#fff', borderRadius: 3,
-    padding: '1px 5px', width: 'fit-content',
-  },
-  centerMsg: { color: '#666', padding: 24, textAlign: 'center', gridColumn: '1/-1' },
-  modalError: {
-    marginTop: 12, padding: '10px 12px', borderRadius: 8, fontSize: 13,
-    background: 'rgba(220, 38, 38, 0.12)', color: 'var(--color-bad)',
-    border: '1px solid rgba(220, 38, 38, 0.35)',
-  },
-  retryBtn: {
-    marginTop: 12, padding: '8px 16px', borderRadius: 8, cursor: 'pointer',
-    border: '1px solid var(--color-brand)', background: 'transparent',
-    color: 'var(--color-brand)', fontSize: 13, fontWeight: 600,
-  },
-
-  // Cart
-  cart: {
-    width: 360, display: 'flex', flexDirection: 'column', background: '#16213e',
-    overflow: 'hidden',
-  },
-  cartHeader: {
-    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-    padding: '12px 14px', borderBottom: '1px solid #333', flexShrink: 0,
-  },
-  cartTitle: { fontSize: 16, fontWeight: 'bold', color: '#fff' },
-  clearBtn: {
-    background: 'none', border: '1px solid #c0392b', color: '#c0392b',
-    padding: '3px 10px', cursor: 'pointer', borderRadius: 3, fontSize: 12,
-  },
-  customerSection: {
-    padding: '8px 12px', borderBottom: '1px solid #2a2a4a', flexShrink: 0,
-  },
-  inputRow: { display: 'flex', gap: 6 },
-  customerInput: {
-    flex: 1, padding: '6px 8px', background: '#2a2a4a', border: '1px solid #555',
-    color: '#fff', borderRadius: 4, fontSize: 12,
-  },
-  searchBtn: {
-    padding: '6px 10px', background: '#0f3460', border: 'none',
-    color: '#fff', cursor: 'pointer', borderRadius: 4, fontSize: 12,
-  },
-  customerCard: {
-    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
-    background: '#0f3460', padding: '8px 10px', borderRadius: 6,
-  },
-  customerInfo: { display: 'flex', flexDirection: 'column', gap: 2, fontSize: 12 },
-  ltvBadge: { color: '#4a9e4a', fontSize: 11 },
-  changeBtn: {
-    background: 'none', border: '1px solid #555', color: '#aaa',
-    padding: '3px 8px', cursor: 'pointer', borderRadius: 3, fontSize: 11,
-  },
-  newCustomerForm: { display: 'flex', flexDirection: 'column', gap: 5 },
-  newCustomerLabel: { fontSize: 11, color: '#aaa', fontWeight: 'bold' },
-  formInput: {
-    padding: '5px 8px', background: '#2a2a4a', border: '1px solid #555',
-    color: '#fff', borderRadius: 4, fontSize: 12,
-  },
-  cartItems: { flex: 1, overflowY: 'auto', padding: '8px 12px' },
-  emptyCart: { color: '#555', textAlign: 'center', padding: 32, fontSize: 13 },
-  cartItem: {
-    borderBottom: '1px solid #2a2a4a', paddingBottom: 8, marginBottom: 8,
-    display: 'flex', gap: 8, alignItems: 'flex-start',
-  },
-  cartItemInfo: { flex: 1, display: 'flex', flexDirection: 'column', gap: 3 },
-  cartItemName: { fontSize: 13, fontWeight: 'bold', color: '#e0e0e0' },
-  cartItemProtein: { fontSize: 11, color: '#e67e22' },
-  obsInput: {
-    background: '#2a2a4a', border: '1px solid #3a3a5a', color: '#aaa',
-    borderRadius: 3, padding: '3px 6px', fontSize: 11, width: '100%',
-  },
-  cartItemControls: { display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 },
-  qtyBtn: {
-    width: 24, height: 24, background: '#2a2a4a', border: '1px solid #555',
-    color: '#fff', cursor: 'pointer', borderRadius: 3, fontSize: 14, lineHeight: 1,
-  },
-  qtyDisplay: { width: 24, textAlign: 'center', fontSize: 14 },
-  itemSubtotal: { fontSize: 12, color: '#4a9e4a', minWidth: 64, textAlign: 'right' },
-  cartFooter: {
-    padding: '10px 12px', borderTop: '2px solid #333', flexShrink: 0,
-    display: 'flex', flexDirection: 'column', gap: 8,
-  },
-  totalRow: { display: 'flex', justifyContent: 'space-between', fontSize: 13 },
-  totalFinal: { fontSize: 17, fontWeight: 'bold', color: '#fff' },
-  discountInput: {
-    width: 70, textAlign: 'right', background: '#2a2a4a',
-    border: '1px solid #555', color: '#e0e0e0', borderRadius: 3,
-    padding: '2px 6px', fontSize: 13,
-  },
-  // Bairro/taxa: mesma paleta escura do restante do carrinho.
-  zoneRow: { display: 'flex', alignItems: 'center', gap: 8 },
-  zoneLabel: { fontSize: 13, color: '#b8b8d0', flexShrink: 0 },
-  zoneSelect: {
-    flex: 1, minWidth: 0, background: '#2a2a4a', border: '1px solid #555',
-    color: '#e0e0e0', borderRadius: 3, padding: '4px 6px', fontSize: 13,
-  },
-  zoneWarning: {
-    background: '#4a3a1a', border: '1px solid #8a6d1a', color: '#f0d98a',
-    borderRadius: 3, padding: '5px 8px', fontSize: 12,
-  },
-  paymentMethods: { display: 'flex', gap: 4, flexWrap: 'wrap' },
-  payBtn: {
-    padding: '4px 10px', background: '#2a2a4a', border: '1px solid #444',
-    color: '#aaa', cursor: 'pointer', borderRadius: 3, fontSize: 11,
-  },
-  payBtnActive: { background: '#27ae60', color: '#fff', borderColor: '#27ae60' },
-  obsTextarea: {
-    background: '#2a2a4a', border: '1px solid #555', color: '#ccc',
-    borderRadius: 4, padding: '6px 8px', fontSize: 12, resize: 'none',
-  },
-  checkoutBtn: {
-    padding: '12px', background: '#e74c3c', border: 'none',
-    color: '#fff', cursor: 'pointer', borderRadius: 6,
-    fontSize: 15, fontWeight: 'bold', letterSpacing: 1,
-  },
-
-  // Modais
-  modalOverlay: {
-    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999,
-  },
-  modal: {
-    background: '#1a1a2e', border: '1px solid #444', borderRadius: 8,
-    padding: 28, minWidth: 320, maxWidth: 420, display: 'flex',
-    flexDirection: 'column', gap: 14,
-  },
-  modalTitle: { fontSize: 17, fontWeight: 'bold', color: '#fff' },
-  comboOptions: { display: 'flex', flexDirection: 'column', gap: 8 },
-  comboOptionBtn: {
-    padding: '12px 16px', background: '#0f3460', border: '1px solid #4a90e2',
-    color: '#fff', cursor: 'pointer', borderRadius: 6, fontSize: 14,
-    textAlign: 'left',
-  },
-  confirmSummary: {
-    display: 'flex', flexDirection: 'column', gap: 8, fontSize: 14,
-    background: '#16213e', padding: 14, borderRadius: 6,
-  },
-  printNote: { color: '#4a9e4a', fontSize: 12, marginTop: 4 },
-  modalActions: { display: 'flex', gap: 10 },
-  confirmBtn: {
-    flex: 1, padding: '10px', background: '#27ae60', border: 'none',
-    color: '#fff', cursor: 'pointer', borderRadius: 6, fontSize: 14, fontWeight: 'bold',
-  },
-  cancelBtn: {
-    padding: '10px 16px', background: 'none', border: '1px solid #555',
-    color: '#aaa', cursor: 'pointer', borderRadius: 6, fontSize: 14,
-  },
-  successIcon: {
-    width: 60, height: 60, background: '#27ae60', borderRadius: '50%',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontSize: 18, fontWeight: 'bold', color: '#fff', alignSelf: 'center',
-  },
-};

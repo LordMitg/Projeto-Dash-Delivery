@@ -12,11 +12,17 @@ interface ToggleResponse {
  *
  * Fica no menu porque é a informação que muda o comportamento de todo o resto:
  * com a loja fechada o backend recusa novos pedidos, então o operador precisa
- * ver esse estado sem procurar. Somente admin e gerente podem alternar — um
- * operador não deveria conseguir fechar a loja no meio do movimento.
+ * ver esse estado sem procurar.
+ *
+ * Quem NAO pode alternar continua vendo o status, so sem o botao: esconder a
+ * informacao deixaria o operador sem entender por que o PDV recusa pedidos.
  */
 export function StoreStatusBadge() {
-  const { tenant, patchTenant, canSeeFinancials } = useAuth()
+  const { tenant, patchTenant, can } = useAuth()
+  // Antes era `canSeeFinancials` (= `reports:view`), que nao tem relacao com
+  // abrir a loja: um gerente sem acesso a faturamento perdia o interruptor,
+  // enquanto quem so via relatorio ganhava o poder de fechar a loja.
+  const canToggle = can('store:toggle')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -49,7 +55,7 @@ export function StoreStatusBadge() {
   )
   const label = isOpen ? 'Loja aberta' : 'Loja fechada'
 
-  if (!canSeeFinancials) {
+  if (!canToggle) {
     return (
       <div className="flex items-center gap-2 rounded-md bg-ink-soft px-3 py-2">
         {dot}

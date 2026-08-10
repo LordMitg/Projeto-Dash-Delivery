@@ -34,6 +34,8 @@ import menuRoutes from './routes/menuRoutes.js'
 import orderRoutes from './routes/orderRoutes.js'
 import customerRoutes from './routes/customerRoutes.js'
 import financialRoutes from './routes/financialRoutes.js'
+import cashRoutes from './routes/cashRoutes.js'
+import payableRoutes from './routes/payableRoutes.js'
 import invoiceRoutes from './routes/invoiceRoutes.js'
 import pricingRoutes from './routes/pricingRoutes.js'
 import storeRoutes from './routes/storeRoutes.js'
@@ -100,18 +102,31 @@ app.use('/api/users', userRoutes)
 // A permissao de LEITURA e exigida no mount; a de escrita fica dentro de cada
 // rota, no verbo que altera dados.
 app.use('/api/ingredients', authenticate, requirePermission('ingredients:view'), ingredientRoutes)
-app.use('/api/products', authenticate, requirePermission('products:view'), productRoutes)
-app.use('/api/menu', authenticate, requirePermission('products:view'), menuRoutes)
+// `pdv:use` tambem libera a LEITURA de produtos, cardapio e clientes: quem opera
+// o caixa precisa ver o que esta vendendo e buscar o cliente pelo telefone.
+// Sem isso o PDV abria e falhava na hora de listar produtos ("Voce nao tem
+// permissao"), deixando o caixa sem conseguir lancar uma unica venda — mesmo com
+// `pdv:use` marcado. Continua sendo apenas leitura: criar/editar produto exige
+// `products:manage` dentro da propria rota.
+app.use('/api/products', authenticate, requirePermission('products:view', 'pdv:use'), productRoutes)
+app.use('/api/menu', authenticate, requirePermission('products:view', 'pdv:use'), menuRoutes)
 app.use('/api/orders', authenticate, requirePermission('orders:view', 'pdv:use'), orderRoutes)
 // O PDV chamava esta rota desde sempre, mas ela nao existia: 404 em toda busca
 // por telefone, e todo cliente recorrente era cadastrado de novo.
-app.use('/api/customers', authenticate, requirePermission('customers:view'), customerRoutes)
+app.use('/api/customers', authenticate, requirePermission('customers:view', 'pdv:use'), customerRoutes)
 app.use('/api/invoices', authenticate, requirePermission('invoices:manage'), invoiceRoutes)
 app.use('/api/pricing', authenticate, requirePermission('pricing:view'), pricingRoutes)
 // `/api/store` serve tanto leitura (o PDV le taxas e horario) quanto escrita
 // (Ajustes), entao aqui exige apenas login: cada rota interna aplica o seu guard.
 app.use('/api/store', authenticate, storeRoutes)
 app.use('/api/financial', authenticate, requireFinancialAccess, financialRoutes)
+// O caixa exige apenas LEITURA no mount (`cash:operate` ou `pdv:use`): o PDV
+// precisa consultar se ha turno aberto antes de deixar vender, e quem so lanca
+// venda nao tem `cash:operate`. Cada verbo que mexe em dinheiro aplica o guard
+// proprio dentro da rota — abrir e suprimento pedem `cash:operate`, sangria e
+// fechamento pedem `cash:close`.
+app.use('/api/cash', authenticate, requirePermission('cash:operate', 'cash:close', 'pdv:use'), cashRoutes)
+app.use('/api/payables', authenticate, requirePermission('payables:view', 'payables:manage'), payableRoutes)
 
 // ---------- Tratamento de erros ----------
 // A ordem importa: 404 para rota inexistente, depois o error handler.

@@ -1,5 +1,5 @@
 import { Suspense, lazy, useState } from 'react'
-import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
+import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import {
   BarChart3,
   Calculator,
@@ -14,13 +14,17 @@ import {
   Printer,
   Receipt,
   ScanLine,
+  ShieldOff,
   ShoppingCart,
+  Store,
   Tags,
+  Users,
   X,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
-import { LoginPage } from './LoginPage'
+import { AuthGate } from './AuthGate'
 import { StoreStatusBadge } from '../components/StoreStatusBadge'
+import { TenantSwitcher } from '../components/TenantSwitcher'
 
 // Carregamento tardio: quem opera o PDV nao precisa baixar os graficos, e o
 // gerente que abre o DRE nao precisa baixar o leitor de codigo de barras.
@@ -51,16 +55,50 @@ const PrinterSettings = lazy(() =>
 const DeliveryZones = lazy(() =>
   import('../components/DeliveryZones').then((m) => ({ default: m.DeliveryZones })),
 )
+// Telas do dono: um funcionario nunca as abre, entao nao ha motivo para elas
+// pesarem no primeiro carregamento do PDV.
+const MyBusinessPage = lazy(() => import('./MyBusinessPage'))
+const EmployeesPage = lazy(() => import('./EmployeesPage'))
 const PricingPanel = lazy(() => import('../components/PricingPanel'))
 const TechnicalSheet = lazy(() => import('../components/TechnicalSheet'))
 const InvoiceImporter = lazy(() => import('../components/InvoiceImporter'))
+
+/**
+ * Tela de quem entrou mas ainda nao recebeu nenhuma permissao.
+ *
+ * Sem ela o funcionario recem-cadastrado veria a area de trabalho vazia e
+ * concluiria que o sistema esta quebrado. Aqui ele le o motivo e sabe a quem
+ * pedir.
+ */
+function NoAccess() {
+  return (
+    <div className="mx-auto flex max-w-md flex-col items-center gap-3 py-20 text-center">
+      <ShieldOff aria-hidden="true" className="h-8 w-8 text-slate" />
+      <h2 className="text-lg font-semibold text-ink">Nenhuma tela liberada ainda</h2>
+      <p className="text-sm leading-relaxed text-slate">
+        Sua conta está ativa, mas o dono do negócio ainda não marcou o que você pode
+        acessar. Peça a ele para liberar as telas do seu trabalho.
+      </p>
+    </div>
+  )
+}
 
 interface NavItem {
   to: string
   label: string
   icon: typeof LayoutDashboard
-  /** Visivel apenas para quem pode ver dinheiro (admin e gerente). */
-  financial?: boolean
+  /**
+   * Permissao exigida para o item aparecer. A chave e a MESMA que o backend
+   * cobra na rota correspondente.
+   *
+   * Antes existia uma flag `financial` que agrupava tudo que envolvia dinheiro.
+   * Ela nao servia mais: o dono agora libera permissao por permissao, e um caixa
+   * autorizado a consultar preco (`pricing:view`) sem ver faturamento
+   * (`reports:view`) era impossivel de representar com um booleano so.
+   */
+  permission?: string
+  /** Exclusivo do dono: gestao de equipe e perfil da loja nao sao delegaveis. */
+  ownerOnly?: boolean
 }
 
 /** Operacao primeiro: o PDV e a primeira coisa que a cozinha procura. */
@@ -68,40 +106,45 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   {
     title: 'Operação',
     items: [
-      { to: '/pdv', label: 'PDV', icon: ShoppingCart },
-      { to: '/cozinha', label: 'Cozinha', icon: ChefHat },
-      { to: '/scanner', label: 'Scanner', icon: ScanLine },
+      { to: '/pdv', label: 'PDV', icon: ShoppingCart, permission: 'pdv:use' },
+      { to: '/cozinha', label: 'Cozinha', icon: ChefHat, permission: 'kitchen:view' },
+      { to: '/scanner', label: 'Scanner', icon: ScanLine, permission: 'scanner:use' },
     ],
   },
   {
     title: 'Cadastro',
     items: [
-      { to: '/insumos', label: 'Insumos', icon: Package },
-      { to: '/fichas', label: 'Fichas técnicas', icon: FileText },
-      { to: '/notas', label: 'Notas fiscais', icon: Receipt },
-    ],
-  },
-  {
-    title: 'Ajustes',
-    items: [
-      { to: '/configuracoes', label: 'Impressora', icon: Printer },
-      { to: '/entrega', label: 'Bairros e taxas', icon: MapPin, financial: true },
+      { to: '/insumos', label: 'Insumos', icon: Package, permission: 'ingredients:view' },
+      { to: '/fichas', label: 'Fichas técnicas', icon: FileText, permission: 'products:view' },
+      { to: '/notas', label: 'Notas fiscais', icon: Receipt, permission: 'invoices:manage' },
     ],
   },
   {
     title: 'Gestão',
     items: [
-      { to: '/', label: 'Visão geral', icon: BarChart3, financial: true },
-      { to: '/indicadores', label: 'Indicadores', icon: LayoutDashboard, financial: true },
-      { to: '/precos', label: 'Preços', icon: Tags, financial: true },
-      { to: '/simulador', label: 'Simulador', icon: Calculator, financial: true },
+      { to: '/', label: 'Visão geral', icon: BarChart3, permission: 'reports:view' },
+      { to: '/indicadores', label: 'Indicadores', icon: LayoutDashboard, permission: 'reports:view' },
+      { to: '/precos', label: 'Preços', icon: Tags, permission: 'pricing:view' },
+      { to: '/simulador', label: 'Simulador', icon: Calculator, permission: 'pricing:view' },
+    ],
+  },
+  {
+    title: 'Ajustes',
+    items: [
+      { to: '/negocio', label: 'Meu negócio', icon: Store, ownerOnly: true },
+      { to: '/equipe', label: 'Funcionários', icon: Users, ownerOnly: true },
+      { to: '/entrega', label: 'Bairros e taxas', icon: MapPin, permission: 'delivery:manage' },
+      { to: '/configuracoes', label: 'Impressora', icon: Printer, permission: 'printer:manage' },
     ],
   },
 ]
 
 export function App() {
-  const { isAuthenticated, loading, user, tenant, logout, canSeeFinancials } = useAuth()
+  const { isAuthenticated, loading, user, logout, can, isOwner } = useAuth()
   const [navOpen, setNavOpen] = useState(false)
+  // Lido aqui no topo, e nao junto do uso: hooks nao podem ficar depois dos
+  // early returns de `loading` / `!isAuthenticated`.
+  const isPdvRoute = useLocation().pathname.startsWith('/pdv')
 
   if (loading) {
     return (
@@ -113,16 +156,47 @@ export function App() {
     )
   }
 
-  if (!isAuthenticated) return <LoginPage />
+  // Sem sessao a aplicacao inteira e substituida pela porta de entrada: o
+  // <Routes> abaixo pressupoe token, e montar o menu antes disso dispararia
+  // requisicoes que voltariam 401.
+  if (!isAuthenticated) return <AuthGate />
 
   const initials = `${user?.firstName?.[0] ?? ''}${user?.lastName?.[0] ?? ''}`.toUpperCase()
-  const roleLabel =
-    user?.role === 'admin'
-      ? 'Administrador'
-      : user?.role === 'manager'
-        ? 'Gerente'
-        : 'Operador'
-  const homePath = canSeeFinancials ? '/' : '/pdv'
+  // Existem exatamente dois papeis por vinculo: `owner` e `staff`. Os rotulos
+  // antigos ("Administrador", "Gerente") vinham do modelo anterior, em que o
+  // cargo definia o acesso — hoje quem define e a lista de permissoes, e exibir
+  // "Gerente" sugeriria um poder que o cargo nao carrega mais.
+  const roleLabel = isOwner ? 'Dono do negócio' : 'Funcionário'
+
+  /**
+   * Para onde mandar quem digita uma URL inexistente.
+   *
+   * Nao pode ser fixo em '/': essa e a visao geral, que exige `reports:view`. Um
+   * garcom cairia numa rota inexistente para ele e o `Navigate` de fallback o
+   * jogaria de volta ali, em loop. Mandamos cada um para a primeira tela que ele
+   * realmente pode abrir.
+   *
+   * O ultimo caso ('/sem-acesso') existe justamente para fechar esse loop: um
+   * funcionario recem-criado, ainda sem nenhuma caixa marcada, precisa de UMA
+   * rota valida para onde ir.
+   */
+  // O PDV roda FORA do shell: sem menu lateral, sem cabecalho, ocupando a tela
+  // inteira. Numa frente de caixa cada pixel conta, e os 256px do menu custavam
+  // uma coluna inteira de produtos. A propria tela oferece o botao de voltar.
+  if (isPdvRoute) {
+    if (!can('pdv:use')) return <Navigate to="/sem-acesso" replace />
+    return <PDV />
+  }
+
+  const homePath = can('reports:view')
+    ? '/'
+    : can('pdv:use')
+      ? '/pdv'
+      : can('kitchen:view')
+        ? '/cozinha'
+        : can('ingredients:view')
+          ? '/insumos'
+          : '/sem-acesso'
 
   return (
     <div className="flex min-h-screen bg-canvas">
@@ -169,7 +243,9 @@ export function App() {
 
         <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-3 pb-4">
           {NAV_GROUPS.map((group) => {
-            const items = group.items.filter((i) => !i.financial || canSeeFinancials)
+            const items = group.items.filter(
+              (i) => (i.ownerOnly ? isOwner : true) && (!i.permission || can(i.permission)),
+            )
             if (items.length === 0) return null
             return (
               <div key={group.title} className="flex flex-col gap-1">
@@ -234,8 +310,11 @@ export function App() {
           >
             <Menu aria-hidden="true" className="h-5 w-5" />
           </button>
-          <h1 className="truncate text-sm font-semibold text-ink">
-            {tenant?.name ?? 'Minha loja'}
+          {/* O nome da loja virou o alternador: e o mesmo lugar onde o dono
+              procura "em qual negocio eu estou", entao clicar ali para trocar e
+              o gesto esperado. */}
+          <h1 className="min-w-0 truncate">
+            <TenantSwitcher />
           </h1>
         </header>
 
@@ -248,30 +327,59 @@ export function App() {
               </div>
             }
           >
+            {/* Cada rota e registrada apenas se a permissao existe. Uma rota
+                ausente cai no `*` e volta para a home de quem esta logado — e o
+                que impede um funcionario de alcancar uma tela digitando a URL.
+                Esconder so o item do menu nao bastava. */}
             <Routes>
-              <Route path="/pdv" element={<PDV />} />
+              {/* /pdv nao aparece aqui: e tratado antes do shell, em tela cheia. */}
               {/* Antes apontava para <PDV />: a cozinha abria o caixa em vez da
                   fila de producao, e o Kanban nunca existiu de fato. */}
-              <Route path="/cozinha" element={<KitchenDisplay />} />
-              <Route path="/scanner" element={<BarcodeScanner />} />
-              <Route path="/configuracoes" element={<PrinterSettings />} />
-              <Route path="/insumos" element={<IngredientsManagement />} />
-              <Route path="/fichas" element={<TechnicalSheet />} />
-              <Route path="/notas" element={<InvoiceImporter />} />
+              {can('kitchen:view') && <Route path="/cozinha" element={<KitchenDisplay />} />}
+              {can('scanner:use') && <Route path="/scanner" element={<BarcodeScanner />} />}
+              {can('ingredients:view') && (
+                <Route path="/insumos" element={<IngredientsManagement />} />
+              )}
+              {can('products:view') && <Route path="/fichas" element={<TechnicalSheet />} />}
+              {can('invoices:manage') && <Route path="/notas" element={<InvoiceImporter />} />}
+              {can('printer:manage') && (
+                <Route path="/configuracoes" element={<PrinterSettings />} />
+              )}
 
-              {/* Telas com dinheiro ficam atras da permissao. Sem este guard,
-                  um operador digitava a URL e via a margem da loja. */}
-              {canSeeFinancials && (
+              {/* Faturamento e indicadores: `reports:view`. */}
+              {can('reports:view') && (
                 <>
                   <Route path="/" element={<DashboardCharts />} />
                   <Route path="/indicadores" element={<DashboardKPIs />} />
-                  {/* Taxa de entrega e dinheiro: fica atras da mesma permissao
-                      dos precos, senao um operador mudaria o que a loja cobra. */}
-                  <Route path="/entrega" element={<DeliveryZones />} />
+                </>
+              )}
+
+              {/* Preco e simulador tem permissao propria: um caixa pode precisar
+                  consultar preco sem ver o faturamento da loja. */}
+              {can('pricing:view') && (
+                <>
                   <Route path="/precos" element={<PricingPanel />} />
                   <Route path="/simulador" element={<ImpactSimulator />} />
                 </>
               )}
+
+              {/* Taxa por bairro tem a propria chave: define quanto a loja cobra
+                  do cliente, e nao e a mesma decisao de ver relatorio. */}
+              {can('delivery:manage') && <Route path="/entrega" element={<DeliveryZones />} />}
+
+              {/* Perfil da loja e equipe: exclusivos do dono, sem permissao
+                  delegavel. Delegar "gerenciar funcionarios" permitiria que o
+                  funcionario se promovesse a dono e tomasse a loja. */}
+              {isOwner && (
+                <>
+                  <Route path="/negocio" element={<MyBusinessPage />} />
+                  <Route path="/equipe" element={<EmployeesPage />} />
+                </>
+              )}
+
+              {/* Sempre registrada: e o destino de quem ainda nao tem nenhuma
+                  permissao marcada, e sem ela o `*` abaixo entraria em loop. */}
+              <Route path="/sem-acesso" element={<NoAccess />} />
 
               <Route path="*" element={<Navigate to={homePath} replace />} />
             </Routes>

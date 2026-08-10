@@ -9,7 +9,7 @@ import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
 import { asyncHandler, ok, notFound } from '../lib/http.js'
 import { validate } from '../lib/validate.js'
-import { requireAdmin } from '../middleware/auth.js'
+import { requireAdmin, requirePermission } from '../middleware/auth.js'
 import { emitToTenant } from '../lib/realtime.js'
 import {
   getStoreStatus,
@@ -70,6 +70,9 @@ router.get(
  */
 router.patch(
   '/toggle',
+  // Sem este guard a rota so exigia estar logado: um entregador podia fechar a
+  // loja no meio do movimento. Owner passa direto dentro de `hasPermission`.
+  requirePermission('store:toggle'),
   validate({ body: z.object({ isOpen: z.coerce.boolean() }) }),
   asyncHandler(async (req: Request, res: Response) => {
     const { tenantId } = req.auth!

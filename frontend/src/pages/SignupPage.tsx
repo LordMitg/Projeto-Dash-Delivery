@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { ArrowLeft, ArrowRight, Loader2, Store, Upload, X } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { apiGet } from '../lib/api'
+import { toCompactDataUrl } from '../lib/image'
 import {
   AuthShell,
   ErrorBanner,
@@ -23,42 +24,6 @@ import {
 interface SecurityQuestion {
   key: string
   label: string
-}
-
-/**
- * Reduz a imagem antes de enviar.
- *
- * O logo e gravado como data URL no banco, e o servidor recusa acima de ~400 mil
- * caracteres. Uma foto de celular estoura isso facil, e o dono receberia um erro
- * sem entender o motivo. Redimensionar no cliente resolve na origem.
- */
-async function toCompactDataUrl(file: File, maxSize = 256): Promise<string> {
-  const dataUrl = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result))
-    reader.onerror = () => reject(new Error('Não foi possível ler a imagem.'))
-    reader.readAsDataURL(file)
-  })
-
-  const img = new Image()
-  // Necessario para o canvas nao ser "contaminado" e bloquear o toDataURL.
-  img.crossOrigin = 'anonymous'
-  img.src = dataUrl
-  await new Promise((resolve, reject) => {
-    img.onload = resolve
-    img.onerror = () => reject(new Error('Arquivo de imagem inválido.'))
-  })
-
-  const scale = Math.min(1, maxSize / Math.max(img.width, img.height))
-  const canvas = document.createElement('canvas')
-  canvas.width = Math.round(img.width * scale)
-  canvas.height = Math.round(img.height * scale)
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return dataUrl
-  ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-  // PNG preservaria transparencia, mas pesa muito mais; 0.85 em JPEG e
-  // indistinguivel no tamanho em que o logo aparece.
-  return canvas.toDataURL('image/jpeg', 0.85)
 }
 
 export function SignupPage({

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useTenant } from '../context/TenantContext';
+import { apiGet, apiPost, errorMessage } from '../lib/api';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -61,7 +62,13 @@ const EMPTY_FORM: ProductForm = {
   description: '',
 };
 
-const API = 'http://localhost:3001/api';
+/**
+ * As chamadas passam pelo cliente unico (`lib/api`), que injeta o JWT e resolve
+ * a URL base. Este arquivo usava `fetch` com `http://localhost:3001` cravado e
+ * mandava apenas `x-tenant-id` — header que o backend IGNORA, porque a loja
+ * ativa vem dentro do proprio token. Resultado: "Failed to fetch" fora da
+ * maquina do servidor, e 401 quando alcancava a API.
+ */
 
 // ─── Componente Principal ─────────────────────────────────────────────────────
 
@@ -89,13 +96,19 @@ export default function TechnicalSheet() {
   // Carrega ingredientes do tenant
   useEffect(() => {
     if (!tenantId) return;
-    fetch(`${API}/ingredients`, {
-      headers: { 'x-tenant-id': tenantId },
-    })
-      .then((r) => r.json())
-      .then((res) => {
-        if (res.success) setIngredients(res.data);
+    let cancelled = false;
+    apiGet<Ingredient[]>('/api/ingredients')
+      .then((data) => {
+        if (!cancelled) setIngredients(data ?? []);
+      })
+      .catch((err) => {
+        // Sem o .catch, a falha virava "unhandled rejection" e estourava na
+        // tela como erro de runtime em vez de mensagem tratada.
+        if (!cancelled) setSaveMsg(errorMessage(err, 'Nao foi possivel carregar os ingredientes.'));
       });
+    return () => {
+      cancelled = true;
+    };
   }, [tenantId]);
 
   // Preview CMV com debounce de 400ms
@@ -108,22 +121,15 @@ export default function TechnicalSheet() {
           return;
         }
         try {
-          const res = await fetch(`${API}/products/preview-cmv`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-tenant-id': tenantId,
-            },
-            body: JSON.stringify({
-              technicalSheet: currentSheet,
-              laborCost: Number(laborCost) || 0,
-              salePrice: Number(salePrice) || 0,
-            }),
+          const data = await apiPost<CMVResult>('/api/products/preview-cmv', {
+            technicalSheet: currentSheet,
+            laborCost: Number(laborCost) || 0,
+            salePrice: Number(salePrice) || 0,
           });
-          const data = await res.json();
-          if (data.success) setCmv(data.data);
+          setCmv(data);
         } catch (_) {
-          // erro silencioso no preview
+          // Silencioso de proposito: o preview roda a cada tecla digitada, e
+          // um alerta a cada falha atrapalharia mais do que ajudaria.
         }
       }, 400);
     },
@@ -194,30 +200,21 @@ export default function TechnicalSheet() {
     setLoading(true);
     setSaveMsg('');
     try {
-      const res = await fetch(`${API}/products`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-tenant-id': tenantId,
-        },
-        body: JSON.stringify({
-          ...form,
-          price: Number(form.price),
-          laborCost: Number(form.laborCost) || 0,
-          technicalSheet: sheet,
-        }),
+      await apiPost('/api/products', {
+        ...form,
+        price: Number(form.price),
+        laborCost: Number(form.laborCost) || 0,
+        technicalSheet: sheet,
       });
-      const data = await res.json();
-      if (data.success) {
-        setSaveMsg('Produto salvo com sucesso!');
-        setForm(EMPTY_FORM);
-        setSheet([]);
-        setCmv(null);
-      } else {
-        setSaveMsg(`Erro: ${data.error}`);
-      }
+      setSaveMsg('Produto salvo com sucesso!');
+      setForm(EMPTY_FORM);
+      setSheet([]);
+      setCmv(null);
     } catch (e) {
-      setSaveMsg('Erro de conexão com o servidor.');
+      // `errorMessage` mostra o motivo real vindo da API (ex.: SKU duplicado)
+      // em vez do generico "erro de conexao", que mandava o operador conferir
+      // a rede quando o problema estava no formulario.
+      setSaveMsg(errorMessage(e, 'Nao foi possivel salvar o produto.'));
     } finally {
       setLoading(false);
     }

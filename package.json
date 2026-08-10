@@ -12,12 +12,12 @@
     "typecheck": "pnpm --filter delivery-erp-backend typecheck && pnpm --filter delivery-erp-frontend typecheck",
     "db:generate": "pnpm --filter delivery-erp-backend db:generate",
     "db:migrate": "pnpm --filter delivery-erp-backend db:migrate",
+    "db:deploy": "pnpm --filter delivery-erp-backend db:deploy",
     "db:push": "pnpm --filter delivery-erp-backend db:push",
     "db:seed": "pnpm --filter delivery-erp-backend db:seed",
     "db:studio": "pnpm --filter delivery-erp-backend db:studio",
     "db:reset": "pnpm --filter delivery-erp-backend db:reset",
-    "setup": "pnpm install && pnpm db:generate && pnpm db:migrate && pnpm db:seed",
-    "doctor": "node scripts/doctor.mjs"
+    "init:app": "pnpm install && pnpm db:generate && pnpm db:deploy && pnpm db:seed"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

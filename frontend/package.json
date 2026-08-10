@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -b --noEmit false --emitDeclarationOnly false || tsc --noEmit"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "axios": "^1.7.9",

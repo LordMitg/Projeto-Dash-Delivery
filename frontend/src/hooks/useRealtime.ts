@@ -20,13 +20,28 @@ import { useEffect, useRef, useState } from 'react'
 import { io, type Socket } from 'socket.io-client'
 import { getToken } from '../lib/api'
 
-/** Eventos que o backend publica (espelha `RealtimeEvent` do servidor). */
-export type RealtimeEvent =
-  | 'order:created'
-  | 'order:status'
-  | 'order:cancelled'
-  | 'store:status'
-  | 'stock:low'
+/**
+ * Eventos que o backend publica (espelha `RealtimeEvent` do servidor).
+ *
+ * E uma CONSTANTE, nao apenas um tipo, porque o efeito de conexao precisa
+ * percorrer a lista para registrar um listener por evento. Antes a lista estava
+ * escrita a mao dentro do efeito, separada do tipo: quem adicionava um evento
+ * novo atualizava o tipo, o TypeScript aceitava o handler, e o listener
+ * simplesmente nunca era registrado — uma falha silenciosa. Derivando o tipo da
+ * constante, esquecer um evento passa a ser impossivel.
+ */
+export const REALTIME_EVENTS = [
+  'order:created',
+  'order:status',
+  'order:cancelled',
+  'store:status',
+  'stock:low',
+  'cash:opened',
+  'cash:entry',
+  'cash:closed',
+] as const
+
+export type RealtimeEvent = (typeof REALTIME_EVENTS)[number]
 
 export type RealtimeStatus = 'connecting' | 'connected' | 'disconnected'
 
@@ -89,14 +104,7 @@ export function useRealtime({ handlers, enabled = true }: UseRealtimeOptions = {
     if (!s.connected) s.connect()
 
     // Um unico listener por evento, que consulta a ref na hora da chamada.
-    const events: RealtimeEvent[] = [
-      'order:created',
-      'order:status',
-      'order:cancelled',
-      'store:status',
-      'stock:low',
-    ]
-    const bound = events.map((event) => {
+    const bound = REALTIME_EVENTS.map((event) => {
       const fn = (payload: unknown) => handlersRef.current?.[event]?.(payload)
       s.on(event, fn)
       return [event, fn] as const

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useTenant } from '../context/TenantContext'
+import { apiGet, apiPost, apiPut, errorMessage } from '../lib/api'
 
 // ---------------------------------------------------------------------------
 // TIPOS
@@ -50,7 +51,13 @@ interface DeliveryQuote {
   savingLabel: string
 }
 
-const API = 'http://localhost:3001/api/pricing'
+/**
+ * Caminho relativo: o proxy do Vite (dev) e o servidor de producao resolvem o
+ * destino. Estava `http://localhost:3001` cravado aqui, o que so funcionava no
+ * navegador da propria maquina do backend — em qualquer outro dava
+ * "Failed to fetch". O JWT vai pelo cliente de `lib/api`.
+ */
+const API = '/api/pricing'
 
 // ---------------------------------------------------------------------------
 // COMPONENTE PRINCIPAL
@@ -71,26 +78,27 @@ export default function PricingPanel() {
   const [quoteForm, setQuoteForm]   = useState({ orderId: '', distanceKm: '' })
   const [msg, setMsg]               = useState('')
 
-  const headers = {
-    'Content-Type': 'application/json',
-    'x-tenant-id': activeTenant?.id ?? '',
-  }
-
+  // O header `x-tenant-id` que existia aqui foi removido: o backend nunca o le,
+  // a loja ativa vem assinada dentro do JWT.
   const load = useCallback(async () => {
     if (!activeTenant) return
     setLoading(true)
+    setMsg('')
     try {
-      const [chRes, rulesRes, fleetRes] = await Promise.all([
-        fetch(`${API}/channels`, { headers }),
-        fetch(`${API}/table`,    { headers }),
-        fetch(`${API}/fleet`,    { headers }),
-      ])
       const [chData, rulesData, fleetData] = await Promise.all([
-        chRes.json(), rulesRes.json(), fleetRes.json(),
+        apiGet<SalesChannel[]>(`${API}/channels`),
+        apiGet<PricingRule[]>(`${API}/table`),
+        apiGet<FleetMember[]>(`${API}/fleet`),
       ])
-      setChannels(chData.data ?? [])
-      setRules(rulesData.data ?? [])
-      setFleet(fleetData.data ?? [])
+      // `Array.isArray` em vez de `?? []`: se a API mudar o formato, a tela
+      // mostra vazio em vez de estourar num `for...of` sobre um objeto.
+      setChannels(Array.isArray(chData) ? chData : [])
+      setRules(Array.isArray(rulesData) ? rulesData : [])
+      setFleet(Array.isArray(fleetData) ? fleetData : [])
+    } catch (err) {
+      // Antes so havia `finally`: uma falha aqui virava promise rejeitada sem
+      // tratamento, que o React reporta como erro de runtime na tela.
+      setMsg(errorMessage(err, 'Nao foi possivel carregar os dados de precificacao.'))
     } finally {
       setLoading(false)
     }
@@ -100,72 +108,81 @@ export default function PricingPanel() {
 
   // ---- Tabela de preços ----
   const saveRulePrice = async (ruleId: string) => {
-    await fetch(`${API}/rule/${ruleId}/price`, {
-      method: 'PUT',
-      headers,
-      body: JSON.stringify({ finalPrice: parseFloat(editPrice) }),
-    })
-    setEditingRuleId(null)
-    await load()
+    try {
+      await apiPut(`${API}/rule/${ruleId}/price`, { finalPrice: parseFloat(editPrice) })
+      setEditingRuleId(null)
+      await load()
+    } catch (err) {
+      setMsg(errorMessage(err, 'Nao foi possivel salvar o preco.'))
+    }
   }
 
   const recalcAll = async () => {
     setLoading(true)
-    const res = await fetch(`${API}/recalculate-all`, { method: 'POST', headers })
-    const d = await res.json()
-    setMsg(d.message)
-    await load()
-    setLoading(false)
+    try {
+      const d = await apiPost<{ message?: string }>(`${API}/recalculate-all`)
+      setMsg(d?.message ?? 'Precos recalculados.')
+      await load()
+    } catch (err) {
+      setMsg(errorMessage(err, 'Nao foi possivel recalcular os precos.'))
+    } finally {
+      // `setLoading(false)` estava fora de try/finally: se a chamada falhasse,
+      // o botao ficava travado em "carregando" para sempre.
+      setLoading(false)
+    }
   }
 
   // ---- Canal ----
   const saveChannel = async () => {
     if (!channelForm) return
     const isEdit = !!channelForm.id
-    await fetch(`${API}/channels${isEdit ? `/${channelForm.id}` : ''}`, {
-      method: isEdit ? 'PUT' : 'POST',
-      headers,
-      body: JSON.stringify(channelForm),
-    })
-    setChannelForm(null)
-    await load()
+    try {
+      const url = `${API}/channels${isEdit ? `/${channelForm.id}` : ''}`
+      await (isEdit ? apiPut(url, channelForm) : apiPost(url, channelForm))
+      setChannelForm(null)
+      await load()
+    } catch (err) {
+      setMsg(errorMessage(err, 'Nao foi possivel salvar o canal de venda.'))
+    }
   }
 
   // ---- Frota ----
   const saveFleet = async () => {
     if (!fleetForm) return
     const isEdit = !!fleetForm.id
-    await fetch(`${API}/fleet${isEdit ? `/${fleetForm.id}` : ''}`, {
-      method: isEdit ? 'PUT' : 'POST',
-      headers,
-      body: JSON.stringify(fleetForm),
-    })
-    setFleetForm(null)
-    await load()
+    try {
+      const url = `${API}/fleet${isEdit ? `/${fleetForm.id}` : ''}`
+      await (isEdit ? apiPut(url, fleetForm) : apiPost(url, fleetForm))
+      setFleetForm(null)
+      await load()
+    } catch (err) {
+      setMsg(errorMessage(err, 'Nao foi possivel salvar o entregador.'))
+    }
   }
 
   // ---- Cotação ----
   const getQuote = async () => {
-    const res = await fetch(`${API}/delivery-quote`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
+    try {
+      const d = await apiPost<DeliveryQuote>(`${API}/delivery-quote`, {
         orderId: quoteForm.orderId,
         distanceKm: parseFloat(quoteForm.distanceKm),
-      }),
-    })
-    const d = await res.json()
-    setQuote(d.data)
+      })
+      setQuote(d)
+    } catch (err) {
+      setMsg(errorMessage(err, 'Nao foi possivel calcular a cotacao.'))
+    }
   }
 
   const confirmQuote = async (choice: 'own_fleet' | 'app_delivery') => {
-    await fetch(`${API}/delivery-quote/confirm`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ orderId: quoteForm.orderId, choice }),
-    })
-    setMsg(`Decisão "${choice === 'own_fleet' ? 'Frota Própria' : 'App Delivery'}" registrada.`)
-    setQuote(null)
+    try {
+      await apiPost(`${API}/delivery-quote/confirm`, { orderId: quoteForm.orderId, choice })
+      setMsg(`Decisão "${choice === 'own_fleet' ? 'Frota Própria' : 'App Delivery'}" registrada.`)
+      setQuote(null)
+    } catch (err) {
+      // Sem o catch, a decisao parecia registrada mesmo quando a API recusava:
+      // a mensagem de sucesso aparecia antes de qualquer confirmacao.
+      setMsg(errorMessage(err, 'Nao foi possivel registrar a decisao.'))
+    }
   }
 
   // ---- Grupos de linhas por produto ----

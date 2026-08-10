@@ -559,7 +559,8 @@ router.post(
 )
 
 // ---------------------------------------------------------------------------
-// GET /api/auth/status — diagnostico (usado pelo `pnpm doctor`)
+// GET /api/auth/status — diagnostico manual do ambiente.
+// (Citava um `pnpm doctor` que nunca existiu como script.)
 // ---------------------------------------------------------------------------
 
 router.get(

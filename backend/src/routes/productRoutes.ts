@@ -2,8 +2,19 @@ import { Router, Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { CMVService, TechSheetLine } from '../services/cmvService.js';
+import { requirePermission } from '../middleware/auth.js';
 
 const router = Router();
+
+/**
+ * Guard de ESCRITA de produtos.
+ *
+ * O mount em index.ts libera a leitura tambem para `pdv:use` (o caixa precisa
+ * ver o que vende). Sem este guard nas rotas de escrita, esse mesmo mount dava
+ * ao caixa CRUD completo — criar, editar e APAGAR produto. Ler e uma permissao,
+ * alterar o catalogo e outra.
+ */
+const canWriteProducts = requirePermission('products:manage');
 
 // Helpers de resposta
 const ok = (res: Response, data: unknown) => res.status(200).json({ success: true, data });
@@ -148,7 +159,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 // POST /api/products
 // Cria produto simples ou combo com ficha técnica
 // ─────────────────────────────────────────────
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', canWriteProducts, async (req: Request, res: Response) => {
   try {
     const tenantId = req.auth!.tenantId;
     const {
@@ -262,7 +273,7 @@ router.post('/', async (req: Request, res: Response) => {
 // PUT /api/products/:id
 // Atualiza produto e recalcula CMV
 // ─────────────────────────────────────────────
-router.put('/:id', async (req: Request, res: Response) => {
+router.put('/:id', canWriteProducts, async (req: Request, res: Response) => {
   try {
     const tenantId = req.auth!.tenantId;
     const id = String(req.params.id ?? '');
@@ -372,7 +383,9 @@ router.put('/:id', async (req: Request, res: Response) => {
 // POST /api/products/:id/recalculate-cmv
 // Força recálculo do CMV com preços atuais dos insumos
 // ─────────────────────────────────────────────
-router.post('/:id/recalculate-cmv', async (req: Request, res: Response) => {
+// Persiste o novo custo via `recalculateAndPersist`, entao e escrita — ao
+// contrario de `preview-cmv`/`resolve-combo`, que apenas calculam.
+router.post('/:id/recalculate-cmv', canWriteProducts, async (req: Request, res: Response) => {
   try {
     const tenantId = req.auth!.tenantId;
     const id = String(req.params.id ?? '');
@@ -412,7 +425,7 @@ router.post('/preview-cmv', async (req: Request, res: Response) => {
 // ─────────────────────────────────────────────
 // POST /api/products/resolve-combo
 // Resolve qual proteína principal será debitada no combo
-// ─────────────────────────────────────────────
+// ──────────────────────────��──────────────────
 router.post('/resolve-combo', async (req: Request, res: Response) => {
   try {
     const { technicalSheet, selectedProteinId } = req.body;
@@ -431,7 +444,7 @@ router.post('/resolve-combo', async (req: Request, res: Response) => {
 // ─────────────────────────────────────────────
 // DELETE /api/products/:id
 // ─────────────────────────────────────────────
-router.delete('/:id', async (req: Request, res: Response) => {
+router.delete('/:id', canWriteProducts, async (req: Request, res: Response) => {
   try {
     const tenantId = req.auth!.tenantId;
     const id = String(req.params.id ?? '');

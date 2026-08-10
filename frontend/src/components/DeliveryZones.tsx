@@ -42,7 +42,7 @@ function toZones(raw: unknown): Zone[] {
 }
 
 export function DeliveryZones() {
-  const { user } = useAuth()
+  const { isOwner } = useAuth()
   const { data, error, isLoading, mutate } = useSWR<StoreSettings>(
     '/api/store/settings',
     swrFetcher,
@@ -61,10 +61,14 @@ export function DeliveryZones() {
     setZones(toZones(data.deliveryZones))
   }, [data])
 
-  // `PUT /api/store/delivery` usa `requireAdmin` — somente admin. Incluir
-  // manager aqui deixaria o formulario editavel para quem levaria um 403 opaco
-  // no momento de salvar, depois de preencher a tela toda.
-  const canEdit = user?.role === 'admin'
+  // `PUT /api/store/delivery` usa `requireAdmin`, que hoje significa OWNER.
+  //
+  // Esta linha comparava com 'admin', um papel que deixou de existir quando o
+  // vinculo passou a ser `owner`/`staff` — resultado: `canEdit` era sempre falso
+  // e nem o proprio dono conseguia editar as taxas. Espelhar o servidor evita
+  // tambem o caso oposto: formulario editavel que devolve 403 ao salvar, depois
+  // de a tela toda ter sido preenchida.
+  const canEdit = isOwner
 
   function updateZone(index: number, patch: Partial<Zone>) {
     setZones((list) => list.map((z, i) => (i === index ? { ...z, ...patch } : z)))
