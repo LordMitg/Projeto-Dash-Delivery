@@ -7,6 +7,7 @@
     "dev": "concurrently -n \"api,web\" -c \"cyan,magenta\" \"pnpm --filter delivery-erp-backend dev\" \"pnpm --filter delivery-erp-frontend dev\"",
     "dev:api": "pnpm --filter delivery-erp-backend dev",
     "dev:web": "pnpm --filter delivery-erp-frontend dev",
+    "dev:mobile": "cross-env-shell VITE_HTTPS=true concurrently -n \"api,web\" -c \"cyan,magenta\" \"pnpm --filter delivery-erp-backend dev\" \"pnpm --filter delivery-erp-frontend dev\"",
     "build": "pnpm --filter delivery-erp-backend build && pnpm --filter delivery-erp-frontend build",
     "start": "pnpm --filter delivery-erp-backend start",
     "typecheck": "pnpm --filter delivery-erp-backend typecheck && pnpm --filter delivery-erp-frontend typecheck",
@@ -21,6 +22,7 @@
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
+    "cross-env": "^10.1.0",
     "embedded-postgres": "18.4.0-beta.17",
     "typescript": "^5.7.3"
   },

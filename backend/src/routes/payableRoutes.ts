@@ -57,6 +57,21 @@ function startOfToday() {
 }
 
 /**
+ * Meia-noite do dia do vencimento.
+ *
+ * Vencimento e uma DATA, mas e gravado como timestamp ancorado ao meio-dia
+ * (12:00) para nao mudar de dia ao cruzar fusos. Comparar esse meio-dia direto
+ * com a meia-noite de hoje deixa meio dia de sobra na conta — e era exatamente
+ * isso que quebrava o `daysUntilDue`. Zerando a hora dos dois lados a subtracao
+ * volta a ser uma diferenca de dias de calendario.
+ */
+function startOfDueDay(dueDate: Date) {
+  const d = new Date(dueDate)
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
+/**
  * Status efetivo, derivado dos valores.
  *
  * Uma conta parcialmente paga e vencida continua sendo um problema de caixa,
@@ -76,7 +91,14 @@ function decorate<T extends { amount: Prisma.Decimal; amountPaid: Prisma.Decimal
 ) {
   const status = effectiveStatus(row)
   const remaining = round(Math.max(0, num(row.amount) - num(row.amountPaid)))
-  const days = Math.round((row.dueDate.getTime() - startOfToday().getTime()) / 86_400_000)
+  // `Math.round` sobre dois horarios ja zerados: a divisao daria 0,99 ou 1,01
+  // na virada do horario de verao, e arredondar corrige isso. O que NAO pode e
+  // arredondar a meia diaria do meio-dia — com `dueDate` cru, uma conta que
+  // vence hoje caia em 0,5 e virava 1 ("vence amanha"), e uma conta com um dia
+  // de atraso caia em -0,5 e virava 0 ("vence hoje"), escondendo o atraso.
+  const days = Math.round(
+    (startOfDueDay(row.dueDate).getTime() - startOfToday().getTime()) / 86_400_000,
+  )
   return {
     ...row,
     status,
@@ -132,7 +154,17 @@ router.get(
     })
 
     const decorated = rows.map(decorate)
-    const filtered = q.status === 'all' ? decorated : decorated.filter((r) => r.status === q.status)
+
+    // O selo da linha mostra UM status so, e `overdue` ganha de `partial` (uma
+    // conta atrasada e o problema mais urgente). Mas filtrar pelo selo esconderia
+    // justamente a conta mais delicada: quem paga metade de um boleto atrasado
+    // some da aba "Parciais", e o dono perde de vista que ainda deve o resto.
+    // Por isso "Parciais" pergunta pelo fato (tem pagamento e ainda falta saldo),
+    // nao pelo rotulo — a conta aparece nas duas abas, que e o esperado.
+    const matchesStatus = (r: (typeof decorated)[number]) =>
+      q.status === 'partial' ? num(r.amountPaid) > 0 && r.remaining > 0 : r.status === q.status
+
+    const filtered = q.status === 'all' ? decorated : decorated.filter(matchesStatus)
 
     // Totais sobre TUDO que esta em aberto, nao apenas sobre a pagina filtrada:
     // e o numero que o dono usa para saber se o dinheiro do mes fecha.

@@ -5,6 +5,7 @@ import {
   Calculator,
   ChefHat,
   FileText,
+  Landmark,
   LayoutDashboard,
   Loader2,
   LogOut,
@@ -19,6 +20,7 @@ import {
   Store,
   Tags,
   Users,
+  Wallet,
   X,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
@@ -59,6 +61,10 @@ const DeliveryZones = lazy(() =>
 // pesarem no primeiro carregamento do PDV.
 const MyBusinessPage = lazy(() => import('./MyBusinessPage'))
 const EmployeesPage = lazy(() => import('./EmployeesPage'))
+// Caixa e contas a pagar: o PDV ja apontava para `/caixa` antes destas telas
+// existirem, e o clique em "Abrir o caixa" nao levava a lugar nenhum.
+const CashRegisterPage = lazy(() => import('./CashRegisterPage'))
+const PayablesPage = lazy(() => import('./PayablesPage'))
 const PricingPanel = lazy(() => import('../components/PricingPanel'))
 const TechnicalSheet = lazy(() => import('../components/TechnicalSheet'))
 const InvoiceImporter = lazy(() => import('../components/InvoiceImporter'))
@@ -97,6 +103,16 @@ interface NavItem {
    * (`reports:view`) era impossivel de representar com um booleano so.
    */
   permission?: string
+  /**
+   * Alternativa a `permission` quando a tela e liberada por mais de uma chave.
+   *
+   * O caixa e o caso: o servidor monta `/api/cash` com
+   * `requirePermission('cash:operate', 'cash:close', 'pdv:use')` — quem so opera
+   * o PDV precisa consultar o turno para saber se pode vender, mesmo sem poder
+   * abrir ou fechar. Com um `permission` unico o item sumiria para o operador e
+   * o link que o proprio PDV oferece cairia no vazio.
+   */
+  anyPermission?: string[]
   /** Exclusivo do dono: gestao de equipe e perfil da loja nao sao delegaveis. */
   ownerOnly?: boolean
 }
@@ -107,6 +123,12 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
     title: 'Operação',
     items: [
       { to: '/pdv', label: 'PDV', icon: ShoppingCart, permission: 'pdv:use' },
+      {
+        to: '/caixa',
+        label: 'Caixa',
+        icon: Wallet,
+        anyPermission: ['cash:operate', 'cash:close', 'pdv:use'],
+      },
       { to: '/cozinha', label: 'Cozinha', icon: ChefHat, permission: 'kitchen:view' },
       { to: '/scanner', label: 'Scanner', icon: ScanLine, permission: 'scanner:use' },
     ],
@@ -124,6 +146,12 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
     items: [
       { to: '/', label: 'Visão geral', icon: BarChart3, permission: 'reports:view' },
       { to: '/indicadores', label: 'Indicadores', icon: LayoutDashboard, permission: 'reports:view' },
+      {
+        to: '/contas',
+        label: 'Contas a pagar',
+        icon: Landmark,
+        anyPermission: ['payables:view', 'payables:manage'],
+      },
       { to: '/precos', label: 'Preços', icon: Tags, permission: 'pricing:view' },
       { to: '/simulador', label: 'Simulador', icon: Calculator, permission: 'pricing:view' },
     ],
@@ -244,7 +272,10 @@ export function App() {
         <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-3 pb-4">
           {NAV_GROUPS.map((group) => {
             const items = group.items.filter(
-              (i) => (i.ownerOnly ? isOwner : true) && (!i.permission || can(i.permission)),
+              (i) =>
+                (i.ownerOnly ? isOwner : true) &&
+                (!i.permission || can(i.permission)) &&
+                (!i.anyPermission || i.anyPermission.some((p) => can(p))),
             )
             if (items.length === 0) return null
             return (
@@ -344,6 +375,18 @@ export function App() {
               {can('invoices:manage') && <Route path="/notas" element={<InvoiceImporter />} />}
               {can('printer:manage') && (
                 <Route path="/configuracoes" element={<PrinterSettings />} />
+              )}
+
+              {/* Caixa: as tres chaves espelham o mount do servidor. `pdv:use`
+                  entra porque o operador precisa consultar o turno para saber se
+                  pode vender — a propria tela esconde abertura e fechamento de
+                  quem nao tem `cash:operate` / `cash:close`. */}
+              {(can('cash:operate') || can('cash:close') || can('pdv:use')) && (
+                <Route path="/caixa" element={<CashRegisterPage />} />
+              )}
+
+              {(can('payables:view') || can('payables:manage')) && (
+                <Route path="/contas" element={<PayablesPage />} />
               )}
 
               {/* Faturamento e indicadores: `reports:view`. */}

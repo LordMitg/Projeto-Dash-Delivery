@@ -37,6 +37,7 @@ import financialRoutes from './routes/financialRoutes.js'
 import cashRoutes from './routes/cashRoutes.js'
 import payableRoutes from './routes/payableRoutes.js'
 import invoiceRoutes from './routes/invoiceRoutes.js'
+import scannerRoutes from './routes/scannerRoutes.js'
 import pricingRoutes from './routes/pricingRoutes.js'
 import storeRoutes from './routes/storeRoutes.js'
 import publicRoutes from './routes/publicRoutes.js'
@@ -115,6 +116,11 @@ app.use('/api/orders', authenticate, requirePermission('orders:view', 'pdv:use')
 // por telefone, e todo cliente recorrente era cadastrado de novo.
 app.use('/api/customers', authenticate, requirePermission('customers:view', 'pdv:use'), customerRoutes)
 app.use('/api/invoices', authenticate, requirePermission('invoices:manage'), invoiceRoutes)
+// O scanner CONSULTA com `scanner:use` (bipar um codigo e ver o que e), mas
+// GRAVAR estoque exige `ingredients:manage` — aplicado dentro da propria rota
+// de entrada. Sem essa separacao, qualquer um autorizado a conferir precos no
+// balcao poderia alterar o saldo do deposito pelo celular.
+app.use('/api/scanner', authenticate, requirePermission('scanner:use', 'ingredients:manage'), scannerRoutes)
 app.use('/api/pricing', authenticate, requirePermission('pricing:view'), pricingRoutes)
 // `/api/store` serve tanto leitura (o PDV le taxas e horario) quanto escrita
 // (Ajustes), entao aqui exige apenas login: cada rota interna aplica o seu guard.

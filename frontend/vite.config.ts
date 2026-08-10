@@ -78,6 +78,30 @@ export default defineConfig(async () => {
        */
       extensions: ['.mts', '.ts', '.tsx', '.mjs', '.js', '.jsx', '.json'],
     },
+    optimizeDeps: {
+      /**
+       * Dependencias que SO aparecem dentro de `import()` dinamico.
+       *
+       * O scanner do Vite percorre os imports estaticos a partir do entry para
+       * decidir o que pre-empacotar. `recharts` e `barcode-detector` escapam
+       * dessa varredura: o unico arquivo que usa recharts (DashboardCharts) e
+       * carregado por `lazy(() => import(...))`, e o ponyfill do scanner entra
+       * por `await import(...)` so quando a camera abre.
+       *
+       * O efeito era uma falha de corrida na primeira visita ao dashboard: o
+       * Vite descobria o recharts tarde, re-otimizava as dependencias e trocava
+       * o hash da pasta `.vite/deps` (`?v=3b8a1970` virava `?v=fbbd1c92`). O
+       * modulo que ja estava sendo baixado apontava para o hash velho e batia
+       * num arquivo que tinha acabado de deixar de existir — o log do servidor
+       * dizia "The file does not exist at .../deps/recharts.js", e no navegador
+       * isso chegava como "Failed to fetch dynamically imported module" e um
+       * SyntaxError ao tentar interpretar a resposta como JavaScript.
+       *
+       * Declarando as duas aqui elas entram na PRIMEIRA passada e o hash nao
+       * muda no meio da navegacao.
+       */
+      include: ['recharts', 'barcode-detector/ponyfill'],
+    },
     server: {
       // 3000 e a porta que o preview procura. `strictPort` evita o Vite pular
       // para 5174/5175 quando a 3000 esta ocupada: se pular, o preview aponta

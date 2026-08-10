@@ -3,8 +3,26 @@ import { Loader2, Power } from 'lucide-react'
 import { apiPatch, errorMessage } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 
+/**
+ * Resposta de `PATCH /api/store/toggle` — o mesmo `StoreStatus` do servidor.
+ *
+ * Esta interface declarava `{ isOpen: boolean }`, um campo que a rota NUNCA
+ * devolveu. O resultado: `data.isOpen` era `undefined`, o `patchTenant` abaixo
+ * gravava undefined e o badge voltava para "Loja fechada" mesmo com a loja
+ * tendo aberto no banco. Quem clicava via o interruptor "nao funcionar" e
+ * clicava de novo — invertendo o estado real a cada tentativa.
+ *
+ * A distincao entre os dois campos importa:
+ *  - `switchOn` e a chave geral, que e o que ESTE botao controla.
+ *  - `open` e o estado efetivo: chave ligada E dentro do horario cadastrado.
+ * Sao coisas diferentes as 3h da manha, e e por isso que `reason` existe.
+ */
 interface ToggleResponse {
-  isOpen: boolean
+  open: boolean
+  switchOn: boolean
+  withinSchedule: boolean
+  reason: string
+  nextOpening: string | null
 }
 
 /**
@@ -25,20 +43,35 @@ export function StoreStatusBadge() {
   const canToggle = can('store:toggle')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  /**
+   * Aviso do servidor quando a chave esta ligada mas a loja segue fechada por
+   * causa do horario cadastrado. Sem isto o operador liga a chave, ve o badge
+   * continuar vermelho e conclui que o botao esta quebrado.
+   */
+  const [notice, setNotice] = useState('')
 
   const isOpen = Boolean(tenant?.isOpen)
 
   async function toggle() {
     setError('')
+    setNotice('')
     setSaving(true)
     // Atualiza otimista: o clique responde na hora e desfaz se o servidor negar.
     const previous = isOpen
     patchTenant({ isOpen: !previous })
     try {
-      const data = await apiPatch<ToggleResponse>('/api/store/toggle', {
+      const status = await apiPatch<ToggleResponse>('/api/store/toggle', {
         isOpen: !previous,
       })
-      patchTenant({ isOpen: data.isOpen })
+
+      // `switchOn` (a chave), nao `open` (chave + horario): este botao controla
+      // a chave, e refletir `open` faria o proprio clique parecer nao ter
+      // funcionado fora do horario de atendimento.
+      patchTenant({ isOpen: status.switchOn })
+
+      if (status.switchOn && !status.open) {
+        setNotice(status.reason)
+      }
     } catch (err) {
       patchTenant({ isOpen: previous })
       setError(errorMessage(err, 'Não foi possível alterar o status.'))
@@ -84,6 +117,11 @@ export function StoreStatusBadge() {
       {error && (
         <p role="alert" className="px-1 text-[0.6875rem] leading-snug text-bad">
           {error}
+        </p>
+      )}
+      {notice && !error && (
+        <p role="status" className="px-1 text-[0.6875rem] leading-snug text-warn">
+          {notice}
         </p>
       )}
     </div>
