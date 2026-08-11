@@ -6,12 +6,18 @@ REM  DASH DELIVERY ERP - INICIALIZACAO (Windows)
 REM
 REM  Duplo clique neste arquivo. NAO precisa de Administrador.
 REM
+REM  O banco de dados fica na NUVEM (Neon), entao:
+REM    - nao precisa instalar PostgreSQL no PC
+REM    - precisa de internet para o sistema funcionar
+REM    - os dados sao os mesmos vistos de qualquer computador
+REM
 REM  O que este script faz, na ordem:
 REM    1. confere Node.js e habilita o pnpm
-REM    2. cria backend\.env na primeira vez (com JWT_SECRET aleatorio)
+REM    2. cria backend\.env na primeira vez e pede a string do Neon
 REM    3. instala dependencias (pnpm, na raiz - e um workspace)
-REM    4. cria/atualiza o banco e popula o usuario de acesso
-REM    5. sobe backend (3001) e frontend (3000) em duas janelas
+REM    4. confere a conexao com o banco, com o erro explicado
+REM    5. cria/atualiza as tabelas e o usuario de acesso
+REM    6. sobe backend (3001) e frontend (3000) em duas janelas
 REM ============================================================
 
 cd /d "%~dp0"
@@ -34,7 +40,9 @@ REM ---------------------------------------------------------
 where node >nul 2>&1
 if %errorlevel% neq 0 (
     echo ERRO: Node.js nao encontrado.
-    echo Instale a versao LTS em https://nodejs.org e abra este arquivo de novo.
+    echo.
+    echo   Instale a versao LTS em https://nodejs.org
+    echo   Depois FECHE esta janela e abra este arquivo de novo.
     echo.
     pause
     exit /b 1
@@ -60,6 +68,10 @@ REM 2. backend\.env
 REM
 REM Sem este arquivo o Prisma falha com uma mensagem obscura
 REM ("Environment variable not found: DATABASE_URL").
+REM
+REM Diferente da versao com banco local, aqui NAO da para gerar um
+REM endereco valido sozinho: a string do Neon e pessoal. Por isso o
+REM script abre o arquivo no Notepad e espera ele ser fechado.
 REM ---------------------------------------------------------
 if not exist "backend\.env" (
     echo Primeira execucao: criando backend\.env a partir do exemplo...
@@ -71,13 +83,24 @@ if not exist "backend\.env" (
     node -e "const f=require('fs'),p='backend/.env';let c=f.readFileSync(p,'utf8');c=c.replace(/^JWT_SECRET=.*$/m,'JWT_SECRET='+require('crypto').randomBytes(48).toString('hex'));f.writeFileSync(p,c)"
 
     echo.
-    echo    backend\.env criado com JWT_SECRET aleatorio.
+    echo    =============================================================
+    echo     FALTA UM PASSO SEU: o endereco do banco de dados
+    echo    =============================================================
     echo.
-    echo    ATENCAO: confira a senha do PostgreSQL dentro dele.
-    echo    A linha DATABASE_URL vem com o padrao postgres:postgres.
-    echo    Se a sua senha for outra, edite o arquivo antes de continuar.
+    echo     1. Entre em https://neon.tech e abra o seu projeto
+    echo     2. Clique no botao "Connect"
+    echo     3. Copie a string que aparece (comeca com postgresql://)
+    echo     4. O Notepad vai abrir: substitua a linha
+    echo          DATABASE_URL="COLE_AQUI_A_STRING_DO_NEON"
+    echo        pela string copiada, MANTENDO as aspas duplas
+    echo     5. Salve (Ctrl+S) e feche o Notepad
+    echo.
+    echo     A string precisa terminar com  ?sslmode=require
+    echo    =============================================================
     echo.
     pause
+    start /wait notepad "backend\.env"
+    echo.
 ) else (
     echo backend\.env ja existe.
 )
@@ -102,11 +125,24 @@ echo.
 REM ---------------------------------------------------------
 REM 4. Banco de dados
 REM
-REM "migrate deploy" aplica as migrations versionadas e cria o
-REM banco caso ele ainda nao exista (nao usar "db push": ele
-REM ignora o historico de migrations e causa divergencia).
+REM A conferencia vem ANTES do Prisma de proposito: ela testa arquivo,
+REM formato do endereco, DNS, porta e senha em etapas separadas e diz
+REM em portugues qual delas quebrou. O Prisma sozinho responde
+REM "P1001: Can't reach database server" para qualquer uma dessas
+REM causas - foi exatamente o erro que travou a primeira versao.
 REM ---------------------------------------------------------
-echo [1/3] Gerando cliente Prisma...
+echo [1/4] Conferindo o endereco do banco de dados...
+call !PNPM! --filter delivery-erp-backend db:check
+if %errorlevel% neq 0 (
+    echo.
+    echo   Corrija o que foi indicado acima e abra este arquivo de novo.
+    echo   O arquivo a editar e:  backend\.env
+    echo.
+    pause
+    exit /b 1
+)
+
+echo [2/4] Gerando cliente Prisma...
 call !PNPM! --filter delivery-erp-backend db:generate
 if %errorlevel% neq 0 (
     echo.
@@ -119,20 +155,23 @@ if %errorlevel% neq 0 (
 REM db:deploy = "prisma migrate deploy". NAO usar db:migrate aqui: aquele e o
 REM "migrate dev", que e interativo e pode oferecer RESETAR o banco (apagando
 REM suas vendas) quando detecta divergencia no schema.
-echo [2/3] Aplicando migrations no PostgreSQL...
+echo [3/4] Criando/atualizando as tabelas na nuvem...
 call !PNPM! --filter delivery-erp-backend db:deploy
 if %errorlevel% neq 0 (
     echo.
     echo --------------------------------------------------
-    echo ERRO: nao foi possivel falar com o PostgreSQL.
+    echo ERRO: as tabelas nao puderam ser criadas.
     echo.
-    echo Verifique:
-    echo   1. O servico do PostgreSQL esta rodando?
-    echo      Win+R  ^>  services.msc  ^>  procure "postgresql"
-    echo   2. A senha em backend\.env (DATABASE_URL) esta correta?
-    echo   3. A porta esta certa? O padrao do Postgres e 5432.
+    echo O endereco passou na conferencia, entao o problema
+    echo costuma ser um destes:
     echo.
-    echo O banco NAO precisa existir: as migrations criam ele.
+    echo   1. Conexao "pooler" do Neon travando a migracao.
+    echo      No painel do Neon escolha "Direct connection"
+    echo      (endereco SEM a parte "-pooler") e troque a
+    echo      linha DATABASE_URL em backend\.env.
+    echo.
+    echo   2. A internet caiu no meio do processo.
+    echo      Tente abrir este arquivo de novo.
     echo --------------------------------------------------
     echo.
     pause
@@ -142,7 +181,7 @@ if %errorlevel% neq 0 (
 REM O seed usa upsert, entao rodar sempre e seguro: ele nao apaga
 REM pedidos nem cadastros ja existentes. Sem ele nao existe nenhum
 REM usuario e a tela de login fica intransponivel.
-echo [3/3] Garantindo usuario de acesso (seed)...
+echo [4/4] Garantindo usuario de acesso...
 call !PNPM! --filter delivery-erp-backend db:seed
 if %errorlevel% neq 0 (
     echo AVISO: o seed falhou. O sistema sobe, mas talvez sem usuario para entrar.
@@ -173,6 +212,9 @@ echo.
 echo  Entre com:
 echo     e-mail: admin@local
 echo     senha:  admin123
+echo.
+echo  Se a tela abrir mas nada carregar, olhe a janela
+echo  "Dash Delivery - Backend": o erro aparece la.
 echo.
 echo  Para parar: feche as duas janelas de terminal.
 echo =======================================================

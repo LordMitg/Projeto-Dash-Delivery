@@ -24,6 +24,7 @@ import {
   Calculator,
   ChefHat,
   ChevronLeft,
+  ClipboardList,
   FileText,
   Landmark,
   LayoutDashboard,
@@ -76,6 +77,12 @@ export const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
         label: 'Caixa',
         icon: Wallet,
         anyPermission: ['cash:operate', 'cash:close', 'pdv:use'],
+      },
+      {
+        to: '/pedidos',
+        label: 'Pedidos',
+        icon: ClipboardList,
+        anyPermission: ['orders:view', 'reports:view'],
       },
       { to: '/cozinha', label: 'Cozinha', icon: ChefHat, permission: 'kitchen:view' },
       {

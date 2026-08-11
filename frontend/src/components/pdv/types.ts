@@ -185,3 +185,34 @@ export function brl(value: number): string {
 export function round2(value: number): number {
   return Math.round(value * 100) / 100
 }
+
+// ─── Produto sem foto ─────────────────────────────────────────────────────────
+
+/**
+ * Cor de fundo estavel para o produto que ainda nao tem foto.
+ *
+ * Derivada do nome, e nao aleatoria: o mesmo produto precisa ter sempre a mesma
+ * cor, na grade e na comanda. O operador decora a posicao e a cor do que mais
+ * vende, e uma cor que muda a cada renderizacao destruiria essa memoria — alem
+ * de fazer a tela "piscar" a cada busca.
+ *
+ * Vive aqui, e nao na grade, porque a miniatura da comanda usa a MESMA cor: o
+ * item que o operador tocou na grade precisa ser reconhecivel na linha do
+ * pedido sem reler o nome.
+ */
+const TILE_TINTS = [
+  'bg-[#f3e2d3] text-[#7a4a1d]',
+  'bg-[#e7ecdd] text-[#4a5a32]',
+  'bg-[#f1dfe4] text-[#7d3a52]',
+  'bg-[#e3e6ef] text-[#3f4a6b]',
+  'bg-[#f5e6c8] text-[#79571a]',
+  'bg-[#dee9e8] text-[#325450]',
+]
+
+export function tintFor(name: string): string {
+  let hash = 0
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0
+  // O `??` e exigido pelo `noUncheckedIndexedAccess` do projeto. O modulo ja
+  // garante um indice valido, mas o fallback evita silenciar a checagem com `!`.
+  return TILE_TINTS[hash % TILE_TINTS.length] ?? TILE_TINTS[0]!
+}

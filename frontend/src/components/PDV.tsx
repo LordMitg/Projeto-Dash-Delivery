@@ -31,11 +31,9 @@ import {
   Lock,
   LogOut,
   Menu,
-  Percent,
   Printer,
   ShoppingBag,
   Store,
-  User,
   Wifi,
   WifiOff,
 } from 'lucide-react'
@@ -65,6 +63,7 @@ import {
   type Customer,
   type OrderResponse,
   type OrderType,
+  type PaymentMethod,
   type PaymentSplit,
   type Product,
 } from './pdv/types'
@@ -111,6 +110,12 @@ export function PDV({ onOpenMenu }: PDVProps) {
     lineId: string | null
   } | null>(null)
   const [payOpen, setPayOpen] = useState(false)
+  /**
+   * Forma de pagamento provavel, marcada no painel enquanto o pedido e montado.
+   * Ela apenas ABRE o dialogo de fechamento na opcao certa; quem registra o
+   * pagamento (e divide, e calcula troco) continua sendo o dialogo.
+   */
+  const [payMethod, setPayMethod] = useState<PaymentMethod>('pix')
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [lastSale, setLastSale] = useState<{
@@ -203,7 +208,7 @@ export function PDV({ onOpenMenu }: PDVProps) {
     })
   }, [products, activeCategory, search])
 
-  // ── Totais ───────────────────────────────────────────────���────────────────
+  // ── Totais ───────────────────────────────────────────────�����────────────────
   const subtotal = round2(cart.reduce((sum, item) => sum + lineTotal(item), 0))
 
   const zones = activeTenant?.deliveryZones ?? []
@@ -462,39 +467,18 @@ export function PDV({ onOpenMenu }: PDVProps) {
 
         {/* O nome da loja ja aparece no menu ao lado; repeti-lo aqui gastaria a
             melhor area da barra com a informacao que o operador menos consulta.
-            No lugar dele, o que ele de fato precisa: o que esta fazendo agora e
-            quem esta logado (importa quando o turno troca no meio do dia). */}
-        <div className="min-w-0">
-          <p className="truncate font-display text-base leading-tight text-plum">Novo pedido</p>
-          <p className="truncate text-[0.6875rem] text-slate">
+            Aqui fica a trilha (onde estou) e quem esta logado — isso importa
+            quando o turno troca no meio do dia. O titulo grande e as abas de
+            tipo de pedido descem para a area de trabalho: sao decisoes DO
+            PEDIDO, nao da navegacao. */}
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="font-display text-base leading-tight text-plum">PDV</span>
+          <span aria-hidden="true" className="text-line">
+            /
+          </span>
+          <span className="truncate text-sm text-slate">
             {user?.firstName} {user?.lastName}
-          </p>
-        </div>
-
-        {/* Tipo de pedido: define taxa de entrega e o que a comanda imprime */}
-        <div
-          role="group"
-          aria-label="Tipo de pedido"
-          className="flex gap-1 rounded-lg bg-canvas p-1"
-        >
-          {(['balcao', 'retirada', 'delivery'] as OrderType[]).map((type) => {
-            const active = orderType === type
-            const Icon = type === 'delivery' ? Bike : type === 'retirada' ? ShoppingBag : Store
-            return (
-              <button
-                key={type}
-                type="button"
-                onClick={() => setOrderType(type)}
-                aria-pressed={active}
-                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                  active ? 'bg-plum text-cream' : 'text-slate hover:text-ink'
-                }`}
-              >
-                <Icon aria-hidden="true" className="h-3.5 w-3.5" />
-                {ORDER_TYPE_LABELS[type]}
-              </button>
-            )
-          })}
+          </span>
         </div>
 
         <div className="ml-auto flex items-center gap-3">
@@ -591,6 +575,40 @@ export function PDV({ onOpenMenu }: PDVProps) {
               </p>
             )}
 
+            {/* Titulo e tipo de pedido: o inicio da folha de trabalho.
+                O tipo vem ANTES da busca de proposito — ele muda o total (taxa
+                de entrega) e o que a comanda imprime, entao e a primeira
+                pergunta do atendimento, nao um ajuste de ultima hora. */}
+            <div className="shrink-0 px-6 pt-5 pb-4">
+              <h1 className="font-display text-3xl leading-none text-plum">Novo pedido</h1>
+
+              <div
+                role="group"
+                aria-label="Tipo de pedido"
+                className="mt-4 flex gap-1 rounded-xl border border-line bg-surface p-1 shadow-sm sm:max-w-xl"
+              >
+                {(['delivery', 'retirada', 'balcao'] as OrderType[]).map((type) => {
+                  const active = orderType === type
+                  const Icon =
+                    type === 'delivery' ? Bike : type === 'retirada' ? ShoppingBag : Store
+                  return (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => setOrderType(type)}
+                      aria-pressed={active}
+                      className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors ${
+                        active ? 'bg-plum text-cream' : 'text-slate hover:bg-canvas hover:text-ink'
+                      }`}
+                    >
+                      <Icon aria-hidden="true" className="h-4 w-4" />
+                      {ORDER_TYPE_LABELS[type]}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
             <ProductGrid
               products={filtered}
               categories={categories}
@@ -603,104 +621,9 @@ export function PDV({ onOpenMenu }: PDVProps) {
               searchRef={searchRef}
             />
 
-            {/* Barra de cliente, entrega e desconto */}
-            <div className="shrink-0 border-t border-line bg-surface px-4 py-3">
-              <div className="flex flex-wrap items-end gap-3">
-                <label className="flex min-w-40 flex-col gap-1">
-                  <span className="flex items-center gap-1.5 text-[0.6875rem] font-semibold tracking-wide text-slate uppercase">
-                    <User aria-hidden="true" className="h-3 w-3" />
-                    Telefone do cliente
-                  </span>
-                  <input
-                    type="tel"
-                    inputMode="numeric"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="Opcional"
-                    className="rounded-md border border-line bg-surface px-3 py-2 text-sm tabular-nums text-ink focus:border-brand focus:outline-none"
-                  />
-                </label>
-
-                {/* Resultado da busca de cliente */}
-                {searchingCustomer ? (
-                  <span className="pb-2 text-xs text-slate">Procurando...</span>
-                ) : customer ? (
-                  <div className="pb-1">
-                    <p className="text-sm font-medium text-ink">{customer.name}</p>
-                    <p className="text-xs text-slate">
-                      {customer.totalOrders} pedido{customer.totalOrders === 1 ? '' : 's'}
-                      {customer.neighborhood && ` · ${customer.neighborhood}`}
-                    </p>
-                  </div>
-                ) : phone.replace(/\D/g, '').length >= 8 ? (
-                  <span className="pb-2 text-xs text-warn">Cliente novo (não cadastrado)</span>
-                ) : null}
-
-                {/* Bairro: define a taxa. So aparece em entrega. */}
-                {orderType === 'delivery' && (
-                  <label className="flex min-w-44 flex-col gap-1">
-                    <span className="text-[0.6875rem] font-semibold tracking-wide text-slate uppercase">
-                      Bairro da entrega
-                    </span>
-                    {zones.length > 0 ? (
-                      <select
-                        value={deliveryZone}
-                        onChange={(e) => setDeliveryZone(e.target.value)}
-                        className="rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink focus:border-brand focus:outline-none"
-                      >
-                        <option value="">Taxa base · {brl(Number(activeTenant?.deliveryFeeBase ?? 0))}</option>
-                        {zones.map((zone) => (
-                          <option key={zone.name} value={zone.name}>
-                            {zone.name} · {brl(Number(zone.fee) || 0)}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input
-                        type="text"
-                        value={deliveryZone}
-                        onChange={(e) => setDeliveryZone(e.target.value)}
-                        placeholder="Nenhum bairro cadastrado"
-                        className="rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink focus:border-brand focus:outline-none"
-                      />
-                    )}
-                  </label>
-                )}
-
-                <label className="flex w-28 flex-col gap-1">
-                  <span className="flex items-center gap-1.5 text-[0.6875rem] font-semibold tracking-wide text-slate uppercase">
-                    <Percent aria-hidden="true" className="h-3 w-3" />
-                    Desconto
-                  </span>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    min="0"
-                    step="0.01"
-                    value={discount || ''}
-                    onChange={(e) => setDiscount(Math.max(0, Number(e.target.value)))}
-                    placeholder="0,00"
-                    className="rounded-md border border-line bg-surface px-3 py-2 text-sm tabular-nums text-ink focus:border-brand focus:outline-none"
-                  />
-                </label>
-
-                <label className="flex min-w-48 flex-1 flex-col gap-1">
-                  <span className="text-[0.6875rem] font-semibold tracking-wide text-slate uppercase">
-                    Observação do pedido
-                  </span>
-                  <input
-                    type="text"
-                    value={orderNotes}
-                    onChange={(e) => setOrderNotes(e.target.value)}
-                    placeholder="Ex: entregar no portão dos fundos"
-                    className="rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink focus:border-brand focus:outline-none"
-                  />
-                </label>
-              </div>
-            </div>
           </div>
 
-          {/* Comanda */}
+          {/* Pedido: cliente, entrega, itens, totais e fechamento */}
           <CartPanel
             items={cart}
             subtotal={subtotal}
@@ -708,6 +631,20 @@ export function PDV({ onOpenMenu }: PDVProps) {
             discount={discount}
             total={total}
             disabled={!cash.isOpen}
+            orderType={orderType}
+            phone={phone}
+            onPhoneChange={setPhone}
+            customer={customer}
+            searchingCustomer={searchingCustomer}
+            zones={zones}
+            deliveryFeeBase={Number(activeTenant?.deliveryFeeBase ?? 0)}
+            deliveryZone={deliveryZone}
+            onDeliveryZoneChange={setDeliveryZone}
+            notes={orderNotes}
+            onNotesChange={setOrderNotes}
+            onDiscountChange={setDiscount}
+            method={payMethod}
+            onMethodChange={setPayMethod}
             onChangeQuantity={changeQuantity}
             onRemove={(lineId) => setCart((prev) => prev.filter((i) => i.lineId !== lineId))}
             onEdit={(lineId) => {
@@ -744,6 +681,7 @@ export function PDV({ onOpenMenu }: PDVProps) {
           total={total}
           submitting={submitting}
           error={submitError}
+          initialMethod={payMethod}
           onCancel={() => {
             setPayOpen(false)
             setSubmitError(null)

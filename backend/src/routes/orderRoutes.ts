@@ -140,6 +140,12 @@ const listQuery = z.object({
   status: z.enum(ORDER_STATUSES).optional(),
   // `all=true` ignora o filtro de data (usado em relatorios).
   all: z.enum(['true', 'false']).optional(),
+  /** Filtro do painel: id de um canal de venda cadastrado. */
+  channelId: z.string().optional(),
+  /** Filtro do painel por tipo de pedido (as abas Balcao / Delivery). */
+  orderType: z.enum(['delivery', 'balcao', 'mesa']).optional(),
+  /** Busca por numero do pedido, nome ou telefone do cliente. */
+  search: z.string().trim().min(1).max(60).optional(),
 })
 
 router.get(
@@ -147,7 +153,8 @@ router.get(
   validate({ query: listQuery }),
   asyncHandler(async (req, res) => {
     const tenantId = tenantOf(req)
-    const { date, status, all } = req.query as unknown as z.infer<typeof listQuery>
+    const { date, status, all, channelId, orderType, search } =
+      req.query as unknown as z.infer<typeof listQuery>
 
     const where: Prisma.OrderWhereInput = { tenantId }
 
@@ -161,6 +168,21 @@ router.get(
     }
 
     if (status) where.status = status
+    if (channelId) where.salesChannelId = channelId
+    if (orderType) where.orderType = orderType
+
+    /**
+     * Busca no servidor, e nao filtrando o array no navegador: o painel carrega
+     * apenas o dia, mas o balcao pesquisa pedido de ontem pelo telefone, e esse
+     * pedido nunca estaria na lista local para ser filtrado.
+     */
+    if (search) {
+      where.OR = [
+        { orderNumber: { contains: search, mode: 'insensitive' } },
+        { customer: { name: { contains: search, mode: 'insensitive' } } },
+        { customer: { phone: { contains: search } } },
+      ]
+    }
 
     const orders = await prisma.order.findMany({
       where,
@@ -171,6 +193,10 @@ router.get(
         },
         delivery: true,
         createdBy: { select: { id: true, firstName: true, lastName: true } },
+        // O painel mostra a origem de cada pedido (iFood, Salao, Balcao). Sem
+        // este `include` o cartao ficava sem etiqueta de canal e as abas de
+        // filtro nao tinham dado para filtrar.
+        salesChannel: { select: { id: true, name: true, slug: true } },
       },
       orderBy: { createdAt: 'desc' },
     })
@@ -623,6 +649,20 @@ router.post(
         payments: rawPayments.map((p) => ({ method: p.method, amount: p.amount })),
       })
 
+      // 7c-ter. Primeira linha do historico: o pedido entrou.
+      // O canal vai na `note` porque e o que o feed mostra ao lado do nome
+      // ("Novo pedido #1053 recebido · Fernanda · Delivery").
+      await tx.orderEvent.create({
+        data: {
+          tenantId,
+          orderId: createdOrder.id,
+          actorId: auth.userId,
+          type: 'created',
+          toStatus: 'pending',
+          note: body.orderType,
+        },
+      })
+
       // 7d. LTV do cliente
       if (customerId) {
         await tx.customer.update({
@@ -660,11 +700,23 @@ router.post(
 
 router.patch(
   '/:id/status',
-  validate({ params: idParam, body: z.object({ status: z.enum(ORDER_STATUSES) }) }),
+  validate({
+    params: idParam,
+    body: z.object({
+      status: z.enum(ORDER_STATUSES),
+      /**
+       * Motivo, usado no cancelamento. Sem ele o historico registra "cancelado"
+       * sem dizer por que — e "cliente desistiu" e "faltou ingrediente" pedem
+       * providencias opostas de quem le o painel depois.
+       */
+      reason: z.string().trim().max(200).optional(),
+    }),
+  }),
   asyncHandler(async (req, res) => {
     const tenantId = tenantOf(req)
+    const auth = requireAuth(req)
     const { id } = req.params
-    const { status } = req.body as { status: OrderStatus }
+    const { status, reason } = req.body as { status: OrderStatus; reason?: string }
 
     const order = await prisma.order.findFirst({
       where: { id, tenantId },
@@ -748,6 +800,25 @@ router.patch(
           })
         }
       }
+
+      /**
+       * O evento e gravado DENTRO da transacao, junto da mudanca de status.
+       * Fora dela, um erro entre as duas escritas deixaria o pedido movido sem
+       * registro no historico — exatamente o caso que o feed precisa explicar.
+       */
+      await tx.orderEvent.create({
+        data: {
+          tenantId,
+          // `order.id` e nao `id` do params: o do params e `string | undefined`
+          // sob `noUncheckedIndexedAccess`, e este ja veio validado do banco.
+          orderId: order.id,
+          actorId: auth.userId,
+          type: status === 'cancelled' ? 'cancelled' : 'status',
+          fromStatus: current,
+          toStatus: status,
+          note: reason ?? null,
+        },
+      })
 
       return tx.order.update({
         where: { id },

@@ -23,6 +23,12 @@ const IngredientsManagement = lazy(() =>
     default: m.IngredientsManagement,
   })),
 )
+const OverviewPage = lazy(() =>
+  import('../components/dashboard/OverviewPage').then((m) => ({ default: m.OverviewPage })),
+)
+const OrdersPanel = lazy(() =>
+  import('../components/orders/OrdersPanel').then((m) => ({ default: m.OrdersPanel })),
+)
 const PDV = lazy(() => import('../components/PDV').then((m) => ({ default: m.PDV })))
 const KitchenDisplay = lazy(() =>
   import('../components/KitchenDisplay').then((m) => ({ default: m.KitchenDisplay })),
@@ -229,10 +235,22 @@ export function App() {
                 <Route path="/contas" element={<PayablesPage />} />
               )}
 
+              {/* Painel de pedidos do balcao. Separado de /cozinha de proposito:
+                  a cozinha ve o que produzir, este ve canal, pagamento e atraso.
+                  `orders:view` porque o servidor monta /api/dashboard aceitando
+                  tambem essa chave — quem toca o turno nao tem `reports:view`. */}
+              {(can('orders:view') || can('reports:view')) && (
+                <Route path="/pedidos" element={<OrdersPanel />} />
+              )}
+
               {/* Faturamento e indicadores: `reports:view`. */}
               {can('reports:view') && (
                 <>
-                  <Route path="/" element={<DashboardCharts />} />
+                  {/* A home passou a ser a Visao geral (o dia da operacao). A
+                      analise de 12 meses continua existindo em /faturamento: ela
+                      responde outra pergunta e nao servia como primeira tela. */}
+                  <Route path="/" element={<OverviewPage />} />
+                  <Route path="/faturamento" element={<DashboardCharts />} />
                   <Route path="/indicadores" element={<DashboardKPIs />} />
                 </>
               )}

@@ -1,0 +1,13 @@
+-- Registra a hora em que o pedido foi entregue ao cliente.
+--
+-- O codigo da API ja gravava este campo em PATCH /orders/:id/status desde o
+-- inicio do projeto, mas ele nunca existiu no banco: marcar um pedido como
+-- "entregue" quebrava com 'Unknown argument `deliveredAt`'. A coluna entrou no
+-- schema.prisma e foi aplicada com `db push`, o que NAO gera migration -- entao
+-- um banco criado do zero por `migrate deploy` nasceria sem ela e o defeito
+-- voltaria. Esta migration fecha essa lacuna.
+--
+-- E anulavel de proposito: pedidos antigos, e todos os que ainda estao em
+-- andamento, nao tem hora de entrega. `updatedAt` nao substitui este campo
+-- porque muda a cada gravacao, e nao marca o momento da entrega.
+ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "deliveredAt" TIMESTAMP(3);

@@ -34,6 +34,7 @@ import menuRoutes from './routes/menuRoutes.js'
 import orderRoutes from './routes/orderRoutes.js'
 import customerRoutes from './routes/customerRoutes.js'
 import financialRoutes from './routes/financialRoutes.js'
+import dashboardRoutes from './routes/dashboardRoutes.js'
 import cashRoutes from './routes/cashRoutes.js'
 import payableRoutes from './routes/payableRoutes.js'
 import invoiceRoutes from './routes/invoiceRoutes.js'
@@ -157,6 +158,14 @@ app.use('/api/pricing', authenticate, requirePermission('pricing:view'), pricing
 // (Ajustes), entao aqui exige apenas login: cada rota interna aplica o seu guard.
 app.use('/api/store', authenticate, storeRoutes)
 app.use('/api/financial', authenticate, requireFinancialAccess, financialRoutes)
+/**
+ * Painel de Visao geral. Exige `reports:view` OU `orders:view` — de proposito
+ * mais frouxo que `/api/financial`, que passa pelo `requireFinancialAccess`.
+ * Este painel mostra o dia da operacao (fila, canais, atrasos), nao o resultado
+ * do negocio, e quem toca o turno precisa dele. O lucro que aparece aqui e
+ * apenas o estimado do dia; DRE, CMV e LTV continuam atras do guard financeiro.
+ */
+app.use('/api/dashboard', authenticate, requirePermission('reports:view', 'orders:view'), dashboardRoutes)
 // O caixa exige apenas LEITURA no mount (`cash:operate` ou `pdv:use`): o PDV
 // precisa consultar se ha turno aberto antes de deixar vender, e quem so lanca
 // venda nao tem `cash:operate`. Cada verbo que mexe em dinheiro aplica o guard

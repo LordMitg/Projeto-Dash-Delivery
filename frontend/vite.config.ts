@@ -129,6 +129,33 @@ export default defineConfig(async () => {
       strictPort: true,
       // `host: true` expoe na LAN para o celular acessar pelo IP do PC.
       host: true,
+      /**
+       * Dominios autorizados a falar com o dev server.
+       *
+       * O Vite 6+ recusa requisicoes com `Host` desconhecido (protecao contra
+       * DNS rebinding) devolvendo 403 com um texto em vez do arquivo pedido.
+       * Isso derrubava o preview do v0 por completo: comprovado com
+       * `curl -H "Host: abc-3000.vusercontent.net"`, TODAS as respostas viravam
+       * "Blocked request. This host is not allowed." — inclusive `/src/main.tsx`.
+       * O navegador recebia esse texto no lugar do JavaScript e quebrava com um
+       * SyntaxError, que era o erro visivel na tela.
+       *
+       * O `.` inicial autoriza o dominio e seus subdominios. `localhost` e
+       * enderecos IP passam sem checagem no proprio Vite, entao o acesso local e
+       * pelo IP da LAN (celular) continuam funcionando sem estar nesta lista.
+       * Preferi enumerar os dominios em vez de `allowedHosts: true` para nao
+       * abrir o servidor a qualquer site: com `host: true` ele escuta na rede.
+       */
+      allowedHosts: [
+        '.vusercontent.net', // preview do v0
+        '.v0.dev',
+        '.v0.app',
+        '.vercel.app', // deploys de preview
+        // Tuneis usados para testar no celular fora da LAN (opcional).
+        ...(process.env.VITE_ALLOWED_HOSTS?.split(',')
+          .map((host) => host.trim())
+          .filter(Boolean) ?? []),
+      ],
       proxy: {
         // Sem este proxy, `/api/...` bateria no Vite e devolveria 404 —
         // era a causa do login falhar mesmo com o backend no ar.

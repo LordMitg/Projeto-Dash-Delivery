@@ -64,6 +64,7 @@ model Tenant {
   deliveryQuotes     DeliveryQuote[]
   menuCategories     MenuCategory[]
   productAddons      ProductAddon[]
+  orderEvents        OrderEvent[]
 
   @@map("tenants")
 }
@@ -107,6 +108,7 @@ model User {
   cashRegistersOpened CashRegister[] @relation("CashOpenedBy")
   cashRegistersClosed CashRegister[] @relation("CashClosedBy")
   cashEntries       CashEntry[]
+  orderEvents       OrderEvent[]
 
   @@map("users")
 }
@@ -343,6 +345,15 @@ model Order {
   distanceKm      Decimal? @db.Decimal(8, 2)
   // Endereço de entrega denormalizado para histórico
   deliveryAddress String?
+  /// Quando o pedido foi entregue.
+  ///
+  /// O `PATCH /orders/:id/status` ja tentava gravar este campo desde o import
+  /// inicial do projeto, mas ele nunca existiu no schema: marcar um pedido como
+  /// "entregue" quebrava a requisicao com "Unknown argument `deliveredAt`". O
+  /// campo entra aqui em vez de a linha sair de la, porque a hora da entrega e o
+  /// unico jeito de medir o tempo real de ciclo do pedido — `updatedAt` muda a
+  /// cada gravacao e nao serve.
+  deliveredAt     DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -371,6 +382,7 @@ model Order {
   payments        OrderPayment[]
   delivery        Delivery?
   deliveryQuote   DeliveryQuote?
+  events          OrderEvent[]
 
   @@unique([orderNumber, tenantId])
   @@index([tenantId])
@@ -378,6 +390,47 @@ model Order {
   @@index([createdById])
   @@index([cashRegisterId])
   @@map("orders")
+}
+
+// ========== ORDER EVENT MODEL ==========
+/// Uma linha por acontecimento na vida do pedido: entrou, mudou de etapa, foi
+/// cancelado.
+///
+/// Existe porque o `Order` guarda apenas o estado ATUAL. Perguntas do dia a dia
+/// — "quem aceitou esse pedido?", "a que horas saiu para entrega?", "por que o
+/// #1034 foi cancelado?" — nao tinham resposta: a informacao era sobrescrita a
+/// cada transicao. O feed de Atualizacoes do painel le esta tabela, e por isso
+/// continua preenchido depois de recarregar a pagina (eventos de socket, sozinhos,
+/// morrem com a aba).
+///
+/// Guardamos `fromStatus` alem de `toStatus` de proposito: "voltou de pronto para
+/// em preparo" e um fato operacional diferente de "ficou pronto", e sem o estado
+/// de origem os dois viram a mesma linha.
+model OrderEvent {
+  id         String   @id @default(cuid())
+  /// created | status | cancelled — o tipo governa como a linha e escrita na tela.
+  type       String
+  fromStatus String?
+  toStatus   String?
+  /// Texto livre do contexto: motivo do cancelamento, canal de origem.
+  note       String?
+  createdAt  DateTime @default(now())
+
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  orderId    String
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  /// Quem fez. Fica opcional porque pedido de integracao (iFood) entra sem
+  /// operador humano, e um `actorId` obrigatorio obrigaria a inventar um usuario.
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id])
+
+  /// O feed sempre le "os ultimos do dia deste tenant", nesta ordem exata.
+  @@index([tenantId, createdAt])
+  @@index([orderId])
+  @@map("order_events")
 }
 
 // ========== ORDER PAYMENT MODEL ==========

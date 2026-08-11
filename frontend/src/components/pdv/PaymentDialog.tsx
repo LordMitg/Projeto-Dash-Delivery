@@ -27,6 +27,13 @@ interface Props {
   total: number
   submitting: boolean
   error: string | null
+  /**
+   * Forma escolhida no painel do pedido, para o dialogo abrir ja nela.
+   *
+   * O operador costuma perguntar "como vai pagar?" enquanto monta a comanda; se
+   * o dialogo ignorasse essa resposta, ele teria de informa-la duas vezes.
+   */
+  initialMethod?: PaymentMethod
   onCancel: () => void
   onConfirm: (splits: PaymentSplit[]) => void
 }
@@ -40,13 +47,21 @@ function nextSplitId() {
   return `s${splitSeq}`
 }
 
-export function PaymentDialog({ total, submitting, error, onCancel, onConfirm }: Props) {
+export function PaymentDialog({
+  total,
+  submitting,
+  error,
+  initialMethod = 'cash',
+  onCancel,
+  onConfirm,
+}: Props) {
   /**
-   * Comeca com uma parcela unica em dinheiro cobrindo o total: o caso mais
-   * comum do balcao resolve em um clique, sem digitar valor.
+   * Comeca com uma parcela unica cobrindo o total, na forma que o operador ja
+   * marcou no painel: o caso mais comum do balcao resolve em um clique, sem
+   * digitar valor.
    */
   const [splits, setSplits] = useState<PaymentSplit[]>(() => [
-    { id: nextSplitId(), method: 'cash', amount: round2(total), changeFor: null },
+    { id: nextSplitId(), method: initialMethod, amount: round2(total), changeFor: null },
   ])
 
   const firstFieldRef = useRef<HTMLButtonElement>(null)
@@ -191,7 +206,7 @@ export function PaymentDialog({ total, submitting, error, onCancel, onConfirm }:
                     return (
                       <button
                         key={method}
-                        ref={index === 0 && method === 'cash' ? firstFieldRef : undefined}
+                        ref={index === 0 && method === initialMethod ? firstFieldRef : undefined}
                         type="button"
                         disabled={blocked}
                         onClick={() => setMethod(split.id, method)}
