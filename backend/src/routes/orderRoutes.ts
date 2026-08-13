@@ -349,7 +349,7 @@ router.post(
       const qty = item.quantity
       const unitPrice = Number(product.price)
 
-      // ---- 3a. Proteina do combo ----
+      // ---- 3a. Escolha principal legada do combo ----
       let proteinName: string | null = null
       let proteinIngredientId: string | null = null
 
@@ -360,7 +360,7 @@ router.post(
       if (product.productType === 'combo' && comboOptions.length > 0) {
         if (!item.selectedProteinId) {
           throw badRequest(
-            `"${product.name}" exige a escolha de uma proteina (${comboOptions
+            `"${product.name}" exige a escolha de uma opcao (${comboOptions
               .map((o) => o.label)
               .filter(Boolean)
               .join(', ')}).`,
@@ -370,7 +370,7 @@ router.post(
         const chosen = comboOptions.find((o) => o.ingredientId === item.selectedProteinId)
         if (!chosen) {
           throw badRequest(
-            `A proteina escolhida nao e uma opcao valida de "${product.name}".`,
+            `A opcao escolhida nao e valida para "${product.name}".`,
           )
         }
 
@@ -606,7 +606,13 @@ router.post(
 
       // 7b. Baixa de estoque ANTES de criar o pedido:
       // se faltar insumo, nada e persistido.
-      await applyStockDeduction(tx, tenantId, consumptions, env.ALLOW_NEGATIVE_STOCK)
+      await applyStockDeduction(
+        tx,
+        tenantId,
+        consumptions,
+        env.ALLOW_NEGATIVE_STOCK,
+        auth.userId,
+      )
 
       // 7c. Pedido
       const createdOrder = await tx.order.create({
@@ -787,7 +793,7 @@ router.patch(
           }
         }
 
-        await restoreStock(tx, tenantId, consumptions)
+        await restoreStock(tx, tenantId, consumptions, auth.userId, order.id)
 
         // Desfaz o LTV do cliente.
         if (order.customerId) {

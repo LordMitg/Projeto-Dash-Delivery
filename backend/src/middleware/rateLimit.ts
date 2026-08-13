@@ -42,3 +42,18 @@ export const recoveryLimiter = rateLimit({
     error: 'Muitas tentativas de recuperação. Aguarde alguns minutos.',
   },
 })
+
+/**
+ * Checkout sem login. Limita abuso e pedidos automatizados sem atrapalhar um
+ * cliente real que corrige o carrinho ou tenta novamente.
+ */
+export const publicCheckoutLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: 20,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: {
+    success: false,
+    error: 'Muitas tentativas de pedido. Aguarde alguns minutos e tente novamente.',
+  },
+})

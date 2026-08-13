@@ -199,7 +199,7 @@ export async function apiDelete<T>(url: string): Promise<T> {
 /**
  * Extrai a mensagem de erro legivel de uma falha do axios.
  * Sem isso a UI mostraria "Request failed with status code 400", que nao
- * ajuda o operador a entender que faltou escolher a proteina.
+ * ajuda o operador a entender que faltou escolher uma opcao do produto.
  */
 export function errorMessage(err: unknown, fallback = 'Algo deu errado.'): string {
   if (axios.isAxiosError(err)) {

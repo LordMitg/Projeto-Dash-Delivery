@@ -72,6 +72,41 @@ router.get(
 )
 
 // ---------------------------------------------------------------------------
+// GET /api/ingredients/movements — livro de estoque
+// ---------------------------------------------------------------------------
+
+const movementListQuery = z.object({
+  ingredientId: z.string().trim().optional(),
+  type: z.string().trim().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+})
+
+router.get(
+  '/movements',
+  validate({ query: movementListQuery }),
+  asyncHandler(async (req, res) => {
+    const tenantId = tenantOf(req)
+    const { ingredientId, type, limit } = req.query as unknown as z.infer<typeof movementListQuery>
+
+    const movements = await prisma.stockMovement.findMany({
+      where: {
+        tenantId,
+        ...(ingredientId ? { ingredientId } : {}),
+        ...(type ? { type } : {}),
+      },
+      include: {
+        ingredient: { select: { id: true, name: true, unit: true, sku: true } },
+        actor: { select: { id: true, firstName: true, lastName: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    })
+
+    return ok(res, serialize(movements))
+  }),
+)
+
+// ---------------------------------------------------------------------------
 // GET /api/ingredients/barcode/:code — usado pelo scanner do celular
 // ---------------------------------------------------------------------------
 
@@ -163,20 +198,39 @@ router.post(
       }
     }
 
-    const ingredient = await prisma.ingredient.create({
-      data: {
-        name: body.name,
-        description: body.description ?? null,
-        sku: body.sku,
-        barcode: body.barcode ?? null,
-        unit: body.unit,
-        price: dec(body.price),
-        breakageFactor: dec(body.breakageFactor),
-        stock: dec(body.stock),
-        minimumStock: dec(body.minimumStock),
-        active: body.active,
-        tenantId,
-      },
+    const ingredient = await prisma.$transaction(async (tx) => {
+      const newIngredient = await tx.ingredient.create({
+        data: {
+          name: body.name,
+          description: body.description ?? null,
+          sku: body.sku,
+          barcode: body.barcode ?? null,
+          unit: body.unit,
+          price: dec(body.price),
+          breakageFactor: dec(body.breakageFactor),
+          stock: dec(body.stock),
+          minimumStock: dec(body.minimumStock),
+          active: body.active,
+          tenantId,
+        },
+      })
+
+      if (body.stock !== 0) {
+        await tx.stockMovement.create({
+          data: {
+            type: 'initial',
+            delta: dec(body.stock),
+            balanceBefore: dec(0),
+            balanceAfter: dec(body.stock),
+            reason: 'Saldo inicial do cadastro',
+            tenantId,
+            ingredientId: newIngredient.id,
+            actorId: req.auth!.userId,
+          },
+        })
+      }
+
+      return newIngredient
     })
 
     return createdResponse(res, serialize(ingredient))
@@ -225,7 +279,24 @@ router.put(
     if (body.minimumStock !== undefined) data.minimumStock = dec(body.minimumStock)
     if (body.active !== undefined) data.active = body.active
 
-    const updated = await prisma.ingredient.update({ where: { id }, data })
+    const updated = await prisma.$transaction(async (tx) => {
+      const saved = await tx.ingredient.update({ where: { id }, data })
+      if (body.stock !== undefined && body.stock !== Number(current.stock)) {
+        await tx.stockMovement.create({
+          data: {
+            type: 'adjustment',
+            delta: dec(body.stock - Number(current.stock)),
+            balanceBefore: current.stock,
+            balanceAfter: dec(body.stock),
+            reason: 'Saldo corrigido na edição do insumo',
+            tenantId,
+            ingredientId: id,
+            actorId: req.auth!.userId,
+          },
+        })
+      }
+      return saved
+    })
     return ok(res, serialize(updated))
   }),
 )
@@ -239,7 +310,8 @@ router.put(
 const stockSchema = z.object({
   // Positivo = entrada de mercadoria; negativo = baixa/perda.
   delta: z.coerce.number().refine((n) => n !== 0, 'Informe uma quantidade diferente de zero'),
-  reason: z.string().trim().max(200).optional(),
+  type: z.enum(['entry', 'exit', 'adjustment', 'loss']).optional(),
+  reason: z.string().trim().min(2, 'Informe o motivo').max(200),
 })
 
 router.post(
@@ -249,7 +321,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const tenantId = tenantOf(req)
     const id = String(req.params.id ?? '')
-    const { delta } = req.body as z.infer<typeof stockSchema>
+    const { delta, type, reason } = req.body as z.infer<typeof stockSchema>
 
     const current = await prisma.ingredient.findFirst({ where: { id, tenantId } })
     if (!current) throw notFound('Insumo nao encontrado')
@@ -261,9 +333,32 @@ router.post(
       )
     }
 
-    const updated = await prisma.ingredient.update({
-      where: { id },
-      data: { stock: dec(novoEstoque) },
+    const movementType = type ?? (delta > 0 ? 'entry' : 'exit')
+    if (movementType === 'entry' && delta < 0) {
+      throw conflict('Uma entrada precisa aumentar o saldo.')
+    }
+    if ((movementType === 'exit' || movementType === 'loss') && delta > 0) {
+      throw conflict('Uma saida ou perda precisa reduzir o saldo.')
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const saved = await tx.ingredient.update({
+        where: { id },
+        data: { stock: dec(novoEstoque) },
+      })
+      await tx.stockMovement.create({
+        data: {
+          type: movementType,
+          delta: dec(delta),
+          balanceBefore: current.stock,
+          balanceAfter: dec(novoEstoque),
+          reason,
+          tenantId,
+          ingredientId: id,
+          actorId: req.auth!.userId,
+        },
+      })
+      return saved
     })
 
     return ok(res, serialize(updated))

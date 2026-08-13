@@ -134,7 +134,14 @@ app.use('/api/users', userRoutes)
 // da rota, junto da validacao de tipo e tamanho.
 app.use('/api/uploads', authenticate, uploadRoutes)
 
-app.use('/api/ingredients', authenticate, requirePermission('ingredients:view'), ingredientRoutes)
+// Quem edita fichas tecnicas precisa escolher insumos mesmo quando o perfil nao
+// recebeu acesso a tela completa de estoque.
+app.use(
+  '/api/ingredients',
+  authenticate,
+  requirePermission('ingredients:view', 'products:manage'),
+  ingredientRoutes,
+)
 // `pdv:use` tambem libera a LEITURA de produtos, cardapio e clientes: quem opera
 // o caixa precisa ver o que esta vendendo e buscar o cliente pelo telefone.
 // Sem isso o PDV abria e falhava na hora de listar produtos ("Voce nao tem

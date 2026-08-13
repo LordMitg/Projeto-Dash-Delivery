@@ -40,6 +40,9 @@ model Tenant {
   deliveryZones   Json?
   // Preferências de impressão da comanda (largura da bobina, vias automáticas).
   printSettings   Json?
+  // Aparencia e textos da loja digital. JSON versionado para permitir novos
+  // campos de tema sem migracao a cada ajuste visual.
+  storefrontTheme Json?
 
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -65,6 +68,7 @@ model Tenant {
   menuCategories     MenuCategory[]
   productAddons      ProductAddon[]
   orderEvents        OrderEvent[]
+  stockMovements     StockMovement[]
 
   @@map("tenants")
 }
@@ -109,6 +113,7 @@ model User {
   cashRegistersClosed CashRegister[] @relation("CashClosedBy")
   cashEntries       CashEntry[]
   orderEvents       OrderEvent[]
+  stockMovements    StockMovement[]
 
   @@map("users")
 }
@@ -169,6 +174,24 @@ model Customer {
 
   @@index([tenantId])
   @@map("customers")
+}
+
+// Cadastro simples do consumidor, compartilhado entre as lojas da plataforma.
+// O telefone normalizado e a identidade global; Customer continua sendo a
+// ficha comercial isolada por loja (LTV, quantidade de pedidos e observacoes).
+model ConsumerProfile {
+  id           String   @id @default(cuid())
+  phone        String   @unique
+  name         String
+  address      String?
+  neighborhood String?
+  city         String?
+  state        String?
+  zipCode      String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("consumer_profiles")
 }
 
 // ========== PRODUCT MODEL ==========
@@ -354,6 +377,9 @@ model Order {
   /// unico jeito de medir o tempo real de ciclo do pedido — `updatedAt` muda a
   /// cada gravacao e nao serve.
   deliveredAt     DateTime?
+  // Token aleatorio usado no acompanhamento publico. O numero do pedido e
+  // exibivel e sequencial; nunca deve funcionar como credencial.
+  publicToken     String?  @unique
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -365,8 +391,8 @@ model Order {
   customerId      String?
   customer        Customer? @relation(fields: [customerId], references: [id])
 
-  createdById     String
-  createdBy       User     @relation(fields: [createdById], references: [id])
+  createdById     String?
+  createdBy       User?    @relation(fields: [createdById], references: [id])
 
   // Canal de venda pelo qual o pedido veio
   salesChannelId  String?
@@ -537,12 +563,42 @@ model Ingredient {
   // Relações
   productIngredients ProductIngredient[]
   invoiceItems       InvoiceItem[]
+  stockMovements     StockMovement[]
 
   @@unique([sku, tenantId])
   @@unique([barcode, tenantId])
   @@index([tenantId])
   @@index([barcode])
   @@map("ingredients")
+}
+
+// ========== STOCK MOVEMENT (LIVRO DE ESTOQUE) ==========
+// Toda mudanca de saldo gera uma linha imutavel. O saldo continua no insumo
+// para leitura rapida, enquanto este livro explica como ele chegou ali.
+model StockMovement {
+  id            String   @id @default(cuid())
+  type          String   // entry | exit | adjustment | sale | return | invoice | initial
+  delta         Decimal  @db.Decimal(12, 4)
+  balanceBefore Decimal  @db.Decimal(12, 4)
+  balanceAfter  Decimal  @db.Decimal(12, 4)
+  reason        String?
+  sourceType    String?
+  sourceId      String?
+  createdAt     DateTime @default(now())
+
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  ingredientId  String
+  ingredient    Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+
+  actorId       String?
+  actor         User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([ingredientId, createdAt])
+  @@index([actorId])
+  @@map("stock_movements")
 }
 
 // ========== DRE CATEGORY MODEL ==========

@@ -187,8 +187,17 @@ router.post('/', canWriteProducts, async (req: Request, res: Response) => {
     if (price == null || isNaN(Number(price))) return badRequest(res, 'Preço de venda inválido.');
 
     // Verifica SKU único no tenant
-    const existing = await prisma.product.findFirst({ where: { sku, tenantId } });
+    const normalizedSku = sku.trim().toUpperCase();
+    const existing = await prisma.product.findFirst({ where: { sku: normalizedSku, tenantId } });
     if (existing) return badRequest(res, `SKU "${sku}" já existe neste tenant.`);
+
+    // A categoria informada precisa pertencer a mesma loja do produto.
+    if (menuCategoryId) {
+      const menuCategory = await prisma.menuCategory.findFirst({
+        where: { id: menuCategoryId, tenantId },
+      });
+      if (!menuCategory) return badRequest(res, 'Categoria do cardapio invalida.');
+    }
 
     // Codigo de barras nao pode repetir dentro da mesma loja, senao o
     // scanner do celular ficaria ambiguo.
@@ -205,13 +214,9 @@ router.post('/', canWriteProducts, async (req: Request, res: Response) => {
       }
     }
 
-    // Valida ficha técnica: para combos, exatamente 1 proteína principal
-    if (productType === 'combo') {
-      const mainProteins = (technicalSheet as TechSheetLine[]).filter((l) => l.isMainProtein);
-      if (mainProteins.length !== 1) {
-        return badRequest(res, 'Combos devem ter exatamente 1 proteína principal na ficha técnica.');
-      }
-    }
+    // Combo nao implica proteina. Escolhas vendaveis como tamanho, sabor e
+    // acompanhamento sao configuradas nos grupos de opcoes/adicionais.
+    // `isMainProtein` permanece somente para ler os combos antigos.
 
     // Calcula CMV antes de persistir
     const cmv = await CMVService.calculate(
@@ -228,7 +233,7 @@ router.post('/', canWriteProducts, async (req: Request, res: Response) => {
         data: {
           name: name.trim(),
           description: description?.trim(),
-          sku: sku.trim().toUpperCase(),
+          sku: normalizedSku,
           price: new Prisma.Decimal(price),
           costPrice: new Prisma.Decimal(cmv.totalCostPrice),
           laborCost: new Prisma.Decimal(laborCost),
@@ -298,6 +303,22 @@ router.put('/:id', canWriteProducts, async (req: Request, res: Response) => {
 
     const product = await prisma.product.findFirst({ where: { id, tenantId } });
     if (!product) return notFound(res);
+
+    if (sku !== undefined) {
+      const normalizedSku = sku.trim().toUpperCase();
+      if (!normalizedSku) return badRequest(res, 'SKU e obrigatorio.');
+      const duplicateSku = await prisma.product.findFirst({
+        where: { sku: normalizedSku, tenantId, id: { not: id } },
+      });
+      if (duplicateSku) return badRequest(res, `SKU "${normalizedSku}" ja existe nesta loja.`);
+    }
+
+    if (menuCategoryId) {
+      const menuCategory = await prisma.menuCategory.findFirst({
+        where: { id: menuCategoryId, tenantId },
+      });
+      if (!menuCategory) return badRequest(res, 'Categoria do cardapio invalida.');
+    }
 
     // Codigo de barras precisa continuar unico dentro da loja.
     if (barcode !== undefined && barcode?.trim()) {

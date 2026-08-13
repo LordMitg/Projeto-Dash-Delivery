@@ -55,6 +55,7 @@ export async function applyStockDeduction(
   tenantId: string,
   consumptions: StockConsumption[],
   allowNegative = false,
+  actorId?: string,
 ): Promise<Array<{ ingredientId: string; name: string; deducted: number; remaining: number }>> {
   const merged = mergeConsumptions(consumptions)
   if (merged.size === 0) return []
@@ -93,6 +94,20 @@ export async function applyStockDeduction(
       data: { stock: new Prisma.Decimal(remaining.toFixed(4)) },
     })
 
+    await tx.stockMovement.create({
+      data: {
+        type: 'sale',
+        delta: new Prisma.Decimal((-effectiveQty).toFixed(4)),
+        balanceBefore: ing.stock,
+        balanceAfter: new Prisma.Decimal(remaining.toFixed(4)),
+        reason: 'Baixa automatica por venda',
+        sourceType: 'order',
+        tenantId,
+        ingredientId: ing.id,
+        actorId: actorId ?? null,
+      },
+    })
+
     report.push({
       ingredientId: ing.id,
       name: ing.name,
@@ -112,6 +127,8 @@ export async function restoreStock(
   tx: Tx,
   tenantId: string,
   consumptions: StockConsumption[],
+  actorId?: string,
+  sourceId?: string,
 ): Promise<void> {
   const merged = mergeConsumptions(consumptions)
   if (merged.size === 0) return
@@ -128,6 +145,20 @@ export async function restoreStock(
     await tx.ingredient.update({
       where: { id: ing.id },
       data: { stock: new Prisma.Decimal((Number(ing.stock) + effectiveQty).toFixed(4)) },
+    })
+    await tx.stockMovement.create({
+      data: {
+        type: 'return',
+        delta: new Prisma.Decimal(effectiveQty.toFixed(4)),
+        balanceBefore: ing.stock,
+        balanceAfter: new Prisma.Decimal((Number(ing.stock) + effectiveQty).toFixed(4)),
+        reason: 'Estoque devolvido pelo cancelamento do pedido',
+        sourceType: 'order',
+        sourceId: sourceId ?? null,
+        tenantId,
+        ingredientId: ing.id,
+        actorId: actorId ?? null,
+      },
     })
   }
 }

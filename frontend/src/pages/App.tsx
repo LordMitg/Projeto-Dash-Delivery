@@ -29,6 +29,11 @@ const OverviewPage = lazy(() =>
 const OrdersPanel = lazy(() =>
   import('../components/orders/OrdersPanel').then((m) => ({ default: m.OrdersPanel })),
 )
+const CatalogPage = lazy(() => import('./CatalogPage'))
+const ProductEditorPage = lazy(() => import('./ProductEditorPage'))
+const PublicStorePage = lazy(() => import('./PublicStorePage'))
+const OrderTrackingPage = lazy(() => import('./OrderTrackingPage'))
+const StorefrontSettingsPage = lazy(() => import('./StorefrontSettingsPage'))
 const PDV = lazy(() => import('../components/PDV').then((m) => ({ default: m.PDV })))
 const KitchenDisplay = lazy(() =>
   import('../components/KitchenDisplay').then((m) => ({ default: m.KitchenDisplay })),
@@ -51,7 +56,6 @@ const EmployeesPage = lazy(() => import('./EmployeesPage'))
 const CashRegisterPage = lazy(() => import('./CashRegisterPage'))
 const PayablesPage = lazy(() => import('./PayablesPage'))
 const PricingPanel = lazy(() => import('../components/PricingPanel'))
-const TechnicalSheet = lazy(() => import('../components/TechnicalSheet'))
 const InvoiceImporter = lazy(() => import('../components/InvoiceImporter'))
 
 /**
@@ -79,13 +83,30 @@ export function App() {
   const [navOpen, setNavOpen] = useState(false)
   // Lido aqui no topo, e nao junto do uso: hooks nao podem ficar depois dos
   // early returns de `loading` / `!isAuthenticated`.
-  const isPdvRoute = useLocation().pathname.startsWith('/pdv')
+  const location = useLocation()
+  const isPdvRoute = location.pathname.startsWith('/pdv')
+  const isPublicRoute =
+    location.pathname.startsWith('/loja/') || location.pathname.startsWith('/pedido/')
+
+  // A loja digital e o acompanhamento nao dependem da sessao administrativa.
+  // Eles precisam ser montados antes do loading/login, inclusive em aba anonima.
+  if (isPublicRoute) {
+    return (
+      <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-[#fff8ee]"><Loader2 className="h-6 w-6 animate-spin text-[#4a103a]" /></div>}>
+        <Routes>
+          <Route path="/loja/:slug" element={<PublicStorePage />} />
+          <Route path="/pedido/:token" element={<OrderTrackingPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
+    )
+  }
 
   if (loading) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-canvas px-6 text-center">
         <Loader2 aria-hidden="true" className="h-6 w-6 animate-spin text-brand" />
-        <p className="text-base font-medium text-ink">Carregando o Delivery ERP</p>
+        <p className="text-base font-medium text-ink">Carregando o DeliOne</p>
         <p className="text-sm text-slate">Validando a sua sessão...</p>
       </div>
     )
@@ -160,7 +181,9 @@ export function App() {
         ? '/cozinha'
         : can('ingredients:view')
           ? '/insumos'
-          : '/sem-acesso'
+          : can('products:view')
+            ? '/cardapio'
+            : '/sem-acesso'
 
   return (
     <div className="flex min-h-screen bg-canvas">
@@ -217,7 +240,14 @@ export function App() {
               {can('ingredients:view') && (
                 <Route path="/insumos" element={<IngredientsManagement />} />
               )}
-              {can('products:view') && <Route path="/fichas" element={<TechnicalSheet />} />}
+              {can('products:view') && <Route path="/cardapio" element={<CatalogPage />} />}
+              {can('products:view') && (
+                <>
+                  <Route path="/cardapio/produtos/novo" element={<ProductEditorPage />} />
+                  <Route path="/cardapio/produtos/:id" element={<ProductEditorPage />} />
+                  <Route path="/fichas" element={<Navigate to="/cardapio/produtos/novo" replace />} />
+                </>
+              )}
               {can('invoices:manage') && <Route path="/notas" element={<InvoiceImporter />} />}
               {can('printer:manage') && (
                 <Route path="/configuracoes" element={<PrinterSettings />} />
@@ -275,6 +305,7 @@ export function App() {
                 <>
                   <Route path="/negocio" element={<MyBusinessPage />} />
                   <Route path="/equipe" element={<EmployeesPage />} />
+                  <Route path="/cardapio/loja-digital" element={<StorefrontSettingsPage />} />
                 </>
               )}
 

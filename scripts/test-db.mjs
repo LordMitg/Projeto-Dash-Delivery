@@ -13,8 +13,11 @@ import EmbeddedPostgres from 'embedded-postgres'
 import fs from 'node:fs'
 import path from 'node:path'
 
-const DATA_DIR = path.resolve('.tmp/pgdata')
-const PORT = 55432
+// A porta padrão pode estar ocupada por outro projeto local. Permitir override
+// mantém o banco de teste isolado sem obrigar o desenvolvedor a encerrar o que
+// já está rodando na máquina.
+const PORT = Number(process.env.DELIONE_TEST_DB_PORT ?? 55432)
+const DATA_DIR = path.resolve(process.env.DELIONE_TEST_DB_DIR ?? `.tmp/pgdata-${PORT}`)
 const USER = 'erp'
 const PASSWORD = 'erp'
 const DATABASE = 'delivery_erp_test'

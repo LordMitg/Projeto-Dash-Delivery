@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { AlertCircle } from 'lucide-react'
+import { Logo } from './Logo'
 
 /**
  * Moldura das telas de porta de entrada (entrar, criar conta, recuperar senha).
@@ -27,14 +28,9 @@ export function AuthShell({
     <main className="flex min-h-screen flex-col lg:flex-row">
       <section className="flex flex-col justify-between gap-10 bg-ink px-8 py-10 text-white lg:w-[46%] lg:px-14 lg:py-16">
         <div className="flex items-center gap-3">
-          <span
-            aria-hidden="true"
-            className="flex h-9 w-9 items-center justify-center rounded-md bg-brand text-base font-bold text-white"
-          >
-            D
-          </span>
+          <Logo className="h-9 w-9" />
           <span className="text-sm font-semibold tracking-[0.18em] uppercase">
-            Delivery ERP
+            DeliOne
           </span>
         </div>
 

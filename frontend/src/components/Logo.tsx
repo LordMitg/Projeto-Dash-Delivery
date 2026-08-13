@@ -1,5 +1,5 @@
 /**
- * Simbolo da marca: o pudim.
+ * Símbolo da DeliOne: uma cloche, neutra para qualquer tipo de restaurante.
  *
  * Em componente, e nao em <img src="/favicon.svg">, por dois motivos praticos:
  * o traco herda a cor de quem o usa (`currentColor`), entao o mesmo desenho
@@ -13,7 +13,7 @@ export function Logo({ className = 'h-9 w-9' }: { className?: string }) {
       viewBox="0 0 48 48"
       className={className}
       role="img"
-      aria-label="Pudim"
+      aria-label="DeliOne"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
     >
@@ -25,12 +25,11 @@ export function Logo({ className = 'h-9 w-9' }: { className?: string }) {
         strokeLinejoin="round"
         fill="none"
       >
-        {/* Corpo: tronco de cone, como um pudim desenformado. */}
-        <path d="M13.5 31.5 L18.8 18.5 Q24 15.6 29.2 18.5 L34.5 31.5 Z" />
-        {/* Calda escorrendo pela borda de cima. */}
-        <path d="M19.4 20.2 q2.4 2.6 4.6 0 q2.3 -2.6 4.6 0" />
-        {/* Prato. */}
-        <path d="M9.5 31.5 h29" />
+        <path d="M14 30h20" />
+        <path d="M17 30a7 7 0 0 1 14 0" />
+        <path d="M10.5 34h27" />
+        <path d="M22 21.5h4" />
+        <path d="M24 21.5v1.5" />
       </g>
     </svg>
   )

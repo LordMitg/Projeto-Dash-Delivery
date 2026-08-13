@@ -21,11 +21,11 @@ import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
   BarChart3,
+  BookOpen,
   Calculator,
   ChefHat,
   ChevronLeft,
   ClipboardList,
-  FileText,
   Landmark,
   LayoutDashboard,
   LogOut,
@@ -96,8 +96,8 @@ export const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   {
     title: 'Cadastro',
     items: [
+      { to: '/cardapio', label: 'Cardápio', icon: BookOpen, permission: 'products:view' },
       { to: '/insumos', label: 'Insumos', icon: Package, permission: 'ingredients:view' },
-      { to: '/fichas', label: 'Fichas técnicas', icon: FileText, permission: 'products:view' },
       { to: '/notas', label: 'Notas fiscais', icon: Receipt, permission: 'invoices:manage' },
     ],
   },
@@ -178,15 +178,12 @@ export function SideNav({ defaultCollapsed = false, mobileOpen, onMobileClose, h
           className={`flex shrink-0 items-center gap-2.5 px-4 py-4 ${collapsed ? 'lg:justify-center lg:px-0' : ''}`}
         >
           <Logo className="h-9 w-9 shrink-0" />
-          {/* O nome vem do tenant, nao do codigo: quem usa o sistema e a
-              "Marmitaria Sabor Caseiro", nao um rotulo generico. `line-clamp-2`
-              porque nomes reais de negocio sao longos e o trilho tem 256px. */}
-          <span
-            className={`font-display text-[1.0625rem] leading-tight text-cream line-clamp-2 ${collapsed ? 'lg:hidden' : ''}`}
-            title={activeTenant?.name ?? undefined}
-          >
-            {activeTenant?.name ?? 'Delivery ERP'}
-          </span>
+          <div className={`min-w-0 ${collapsed ? 'lg:hidden' : ''}`}>
+            <p className="font-display text-[1.125rem] leading-tight text-cream">DeliOne</p>
+            <p className="mt-0.5 truncate text-[0.6875rem] text-cream/50" title={activeTenant?.name ?? undefined}>
+              {activeTenant?.name ?? 'Gestão para delivery'}
+            </p>
+          </div>
 
           {/* Fechar (celular) */}
           <button

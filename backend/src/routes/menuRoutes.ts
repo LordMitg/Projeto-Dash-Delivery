@@ -8,11 +8,12 @@ import { Router, type Request, type Response } from 'express'
 import { prisma } from '../lib/prisma.js'
 import { asyncHandler, ok, created, noContent } from '../lib/http.js'
 import { validate } from '../lib/validate.js'
-import { requireStockAccess } from '../middleware/auth.js'
+import { requirePermission } from '../middleware/auth.js'
 import { slugify } from '../lib/slug.js'
 import { z } from 'zod'
 
 const router = Router()
+const requireProductManagement = requirePermission('products:manage')
 
 // ============================================================
 // CATEGORIAS
@@ -45,7 +46,7 @@ router.get(
 /** POST /api/menu/categories */
 router.post(
   '/categories',
-  requireStockAccess,
+  requireProductManagement,
   validate({ body: categorySchema }),
   asyncHandler(async (req: Request, res: Response) => {
     const { tenantId } = req.auth!
@@ -82,7 +83,7 @@ router.post(
 /** PUT /api/menu/categories/:id */
 router.put(
   '/categories/:id',
-  requireStockAccess,
+  requireProductManagement,
   validate({ body: categorySchema.partial() }),
   asyncHandler(async (req: Request, res: Response) => {
     const { tenantId } = req.auth!
@@ -117,7 +118,7 @@ router.put(
  */
 router.delete(
   '/categories/:id',
-  requireStockAccess,
+  requireProductManagement,
   asyncHandler(async (req: Request, res: Response) => {
     const { tenantId } = req.auth!
     const id = String(req.params.id ?? '')
@@ -174,7 +175,7 @@ router.get(
 /** POST /api/menu/addons */
 router.post(
   '/addons',
-  requireStockAccess,
+  requireProductManagement,
   validate({ body: addonSchema }),
   asyncHandler(async (req: Request, res: Response) => {
     const { tenantId } = req.auth!
@@ -226,7 +227,7 @@ router.post(
 /** PUT /api/menu/addons/:id */
 router.put(
   '/addons/:id',
-  requireStockAccess,
+  requireProductManagement,
   validate({ body: addonSchema.partial().omit({ productId: true }) }),
   asyncHandler(async (req: Request, res: Response) => {
     const { tenantId } = req.auth!
@@ -261,7 +262,7 @@ router.put(
 /** DELETE /api/menu/addons/:id */
 router.delete(
   '/addons/:id',
-  requireStockAccess,
+  requireProductManagement,
   asyncHandler(async (req: Request, res: Response) => {
     const { tenantId } = req.auth!
     const id = String(req.params.id ?? '')

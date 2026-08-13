@@ -1,5 +1,5 @@
 /**
- * Montagem de um item: proteina do combo, adicionais e observacao.
+ * Montagem de um item: escolha principal, adicionais e observacao.
  *
  * Um dialogo unico para as tres coisas, porque no atendimento real elas vem
  * juntas na mesma frase do cliente: "marmita de frango, com bacon extra, sem
@@ -126,11 +126,11 @@ export function ItemDialog({ product, initial, onCancel, onConfirm }: Props) {
         </header>
 
         <div className="flex-1 overflow-y-auto px-6 py-5">
-          {/* Proteina do combo */}
+          {/* Escolha principal legada: tamanho, sabor, acompanhamento etc. */}
           {needsProtein && (
             <fieldset>
               <legend className="text-xs font-semibold tracking-wide text-slate uppercase">
-                Escolha a proteína
+                Escolha uma opção
               </legend>
               <div className="mt-3 flex flex-wrap gap-2">
                 {comboOptions.map((option) => {
@@ -229,7 +229,7 @@ export function ItemDialog({ product, initial, onCancel, onConfirm }: Props) {
             <p className="mt-4 flex items-start gap-2 text-xs font-medium text-warn">
               <AlertCircle aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               {proteinMissing
-                ? 'Escolha a proteína para continuar.'
+                ? 'Escolha uma opção para continuar.'
                 : `Escolha uma opção em: ${missingRequired.join(', ')}.`}
             </p>
           )}

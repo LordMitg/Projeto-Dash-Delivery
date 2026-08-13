@@ -19,6 +19,17 @@ import {
 
 const router = Router()
 
+const storefrontThemeSchema = z.object({
+  primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Cor principal invalida'),
+  accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Cor de destaque invalida'),
+  backgroundColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Cor de fundo invalida'),
+  textColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Cor do texto invalida'),
+  tagline: z.string().trim().max(100),
+  bannerTitle: z.string().trim().max(90),
+  bannerSubtitle: z.string().trim().max(180),
+  bannerImageUrl: z.string().trim().max(500),
+})
+
 /**
  * GET /api/store/status
  * Usado pelo PDV a cada carregamento e pelo cardapio publico.
@@ -54,6 +65,8 @@ router.get(
         deliveryFeeBase: true,
         deliveryZones: true,
         printSettings: true,
+        logoData: true,
+        storefrontTheme: true,
       },
     })
 
@@ -61,6 +74,25 @@ router.get(
 
     const status = await getStoreStatus(tenantId)
     return ok(res, { ...tenant, status })
+  }),
+)
+
+/** PUT /api/store/storefront — identidade visual da loja publica. */
+router.put(
+  '/storefront',
+  requireAdmin,
+  validate({ body: storefrontThemeSchema }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { tenantId } = req.auth!
+    const theme = req.body as z.infer<typeof storefrontThemeSchema>
+
+    const updated = await prisma.tenant.update({
+      where: { id: tenantId },
+      data: { storefrontTheme: theme },
+      select: { slug: true, storefrontTheme: true },
+    })
+
+    return ok(res, updated)
   }),
 )
 

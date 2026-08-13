@@ -433,6 +433,22 @@ router.post(
             },
           })
 
+          await tx.stockMovement.create({
+            data: {
+              type: body.chaveAcesso ? 'invoice' : 'entry',
+              delta: dec4(item.quantity),
+              balanceBefore: dec4(0),
+              balanceAfter: dec4(item.quantity),
+              reason: body.numero
+                ? `Entrada pela nota fiscal ${body.numero}`
+                : 'Entrada conferida pelo scanner',
+              sourceType: body.chaveAcesso ? 'invoice' : 'scanner',
+              tenantId,
+              ingredientId: createdIng.id,
+              actorId: req.auth!.userId,
+            },
+          })
+
           ingredientIdByIndex.set(index, createdIng.id)
           applied.push({
             name: createdIng.name,
@@ -460,6 +476,22 @@ router.post(
             // o CMV e a precificacao consultam. Compra sem valor (bonificacao,
             // brinde) nao mexe no preco, senao zeraria o custo do produto.
             ...(item.unitPrice > 0 ? { price: dec2(item.unitPrice) } : {}),
+          },
+        })
+
+        await tx.stockMovement.create({
+          data: {
+            type: body.chaveAcesso ? 'invoice' : 'entry',
+            delta: dec4(item.quantity),
+            balanceBefore: target.stock,
+            balanceAfter: dec4(after),
+            reason: body.numero
+              ? `Entrada pela nota fiscal ${body.numero}`
+              : 'Entrada conferida pelo scanner',
+            sourceType: body.chaveAcesso ? 'invoice' : 'scanner',
+            tenantId,
+            ingredientId: updated.id,
+            actorId: req.auth!.userId,
           },
         })
 
