@@ -74,6 +74,8 @@ interface ProductResponse {
   sortOrder: number
   featured: boolean
   active: boolean
+  preparationStation: string
+  preparationTimeMinutes: number
   technicalSheet: Array<{
     ingredientId: string
     quantity: number | string
@@ -107,6 +109,8 @@ interface ProductForm {
   sortOrder: number
   featured: boolean
   active: boolean
+  preparationStation: string
+  preparationTimeMinutes: number
 }
 
 const emptyForm: ProductForm = {
@@ -123,6 +127,8 @@ const emptyForm: ProductForm = {
   sortOrder: 0,
   featured: false,
   active: true,
+  preparationStation: 'Cozinha',
+  preparationTimeMinutes: 15,
 }
 
 const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -220,6 +226,8 @@ export default function ProductEditorPage() {
           sortOrder: product.sortOrder || 0,
           featured: product.featured,
           active: product.active,
+          preparationStation: product.preparationStation || 'Cozinha',
+          preparationTimeMinutes: product.preparationTimeMinutes || 15,
         })
         setRecipe(
           product.technicalSheet.map((line) => ({
@@ -449,6 +457,8 @@ export default function ProductEditorPage() {
                   <label className="flex flex-col gap-1.5 text-sm font-medium text-ink">Código de barras<input value={form.barcode} disabled={!canManage} onChange={(event) => updateForm('barcode', event.target.value)} placeholder="7890000000000" className={fieldClass} /></label>
                   <label className="flex flex-col gap-1.5 text-sm font-medium text-ink">Categoria<select value={form.menuCategoryId} disabled={!canManage} onChange={(event) => updateForm('menuCategoryId', event.target.value)} className={fieldClass}><option value="">Sem categoria</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
                   <label className="flex flex-col gap-1.5 text-sm font-medium text-ink">Tipo<select value={form.productType} disabled={!canManage} onChange={(event) => updateForm('productType', event.target.value)} className={fieldClass}><option value="simple">Produto simples</option><option value="combo">Combo</option></select></label>
+                  <label className="flex flex-col gap-1.5 text-sm font-medium text-ink">Estacao de preparo<input list="kitchen-stations" value={form.preparationStation} disabled={!canManage} onChange={(event) => updateForm('preparationStation', event.target.value)} placeholder="Ex.: Cozinha, Bar, Grelha" className={fieldClass} /><datalist id="kitchen-stations"><option value="Cozinha" /><option value="Grelha" /><option value="Fritadeira" /><option value="Bar" /><option value="Confeitaria" /><option value="Montagem" /></datalist></label>
+                  <label className="flex flex-col gap-1.5 text-sm font-medium text-ink">Tempo-alvo (min)<input type="number" min="1" max="240" step="1" value={form.preparationTimeMinutes} disabled={!canManage} onChange={(event) => updateForm('preparationTimeMinutes', Number(event.target.value))} className={fieldClass} /></label>
                   <label className="flex flex-col gap-1.5 text-sm font-medium text-ink sm:col-span-2">Descrição<textarea value={form.description} disabled={!canManage} onChange={(event) => updateForm('description', event.target.value)} rows={4} placeholder="Descreva o produto para o cliente" className={`${fieldClass} h-auto resize-y py-3`} /></label>
                   <label className="flex items-center gap-2 text-sm font-medium text-ink"><input type="checkbox" checked={form.featured} disabled={!canManage} onChange={(event) => updateForm('featured', event.target.checked)} className="accent-[#d4a017]" />Mostrar nos destaques</label>
                   <label className="flex items-center gap-2 text-sm font-medium text-ink">Ordem<input type="number" value={form.sortOrder} disabled={!canManage} onChange={(event) => updateForm('sortOrder', Number(event.target.value))} className={`${fieldClass} w-24`} /></label>

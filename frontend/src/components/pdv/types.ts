@@ -157,6 +157,8 @@ export interface Customer {
   city?: string
   ltv: string
   totalOrders: number
+  loyaltyPoints?: number
+  cashbackBalance?: number | string
 }
 
 /** Pedido devolvido por `POST /api/orders`. */

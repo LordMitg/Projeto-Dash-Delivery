@@ -67,6 +67,12 @@ router.get(
         printSettings: true,
         logoData: true,
         storefrontTheme: true,
+        couponsEnabled: true,
+        loyaltyPointsEnabled: true,
+        cashbackEnabled: true,
+        pointsPerReal: true,
+        pointRedemptionValue: true,
+        cashbackPercent: true,
       },
     })
 
@@ -74,6 +80,36 @@ router.get(
 
     const status = await getStoreStatus(tenantId)
     return ok(res, { ...tenant, status })
+  }),
+)
+
+/** PUT /api/store/loyalty — adesao e regras do programa da propria loja. */
+router.put(
+  '/loyalty',
+  requireAdmin,
+  validate({ body: z.object({
+    couponsEnabled: z.boolean(),
+    loyaltyPointsEnabled: z.boolean(),
+    cashbackEnabled: z.boolean(),
+    pointsPerReal: z.coerce.number().min(0).max(100),
+    pointRedemptionValue: z.coerce.number().min(0.0001).max(100),
+    cashbackPercent: z.coerce.number().min(0).max(100),
+  }) }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = req.body as { couponsEnabled:boolean; loyaltyPointsEnabled:boolean; cashbackEnabled:boolean; pointsPerReal:number; pointRedemptionValue:number; cashbackPercent:number }
+    const updated = await prisma.tenant.update({
+      where: { id: req.auth!.tenantId },
+      data: {
+        couponsEnabled: body.couponsEnabled,
+        loyaltyPointsEnabled: body.loyaltyPointsEnabled,
+        cashbackEnabled: body.cashbackEnabled,
+        pointsPerReal: body.pointsPerReal,
+        pointRedemptionValue: body.pointRedemptionValue,
+        cashbackPercent: body.cashbackPercent,
+      },
+      select: { couponsEnabled:true, loyaltyPointsEnabled:true, cashbackEnabled:true, pointsPerReal:true, pointRedemptionValue:true, cashbackPercent:true },
+    })
+    return ok(res, updated)
   }),
 )
 

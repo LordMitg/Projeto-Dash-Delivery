@@ -72,6 +72,18 @@ interface Props {
   notes: string
   onNotesChange: (value: string) => void
   onDiscountChange: (value: number) => void
+  couponCode: string
+  onCouponCodeChange: (value: string) => void
+  cashbackToUse: number
+  onCashbackToUseChange: (value: number) => void
+  pointsToUse: number
+  onPointsToUseChange: (value: number) => void
+  couponsEnabled: boolean
+  cashbackEnabled: boolean
+  loyaltyPointsEnabled: boolean
+  benefitDiscount: number
+  onApplyBenefits: () => void
+  applyingBenefits: boolean
 
   /**
    * Forma de pagamento provavel. E um ATALHO, nao a decisao final: o dialogo de
@@ -114,6 +126,18 @@ export function CartPanel({
   notes,
   onNotesChange,
   onDiscountChange,
+  couponCode,
+  onCouponCodeChange,
+  cashbackToUse,
+  onCashbackToUseChange,
+  pointsToUse,
+  onPointsToUseChange,
+  couponsEnabled,
+  cashbackEnabled,
+  loyaltyPointsEnabled,
+  benefitDiscount,
+  onApplyBenefits,
+  applyingBenefits,
   method,
   onMethodChange,
   onChangeQuantity,
@@ -418,6 +442,12 @@ export function CartPanel({
             />
           </label>
         </div>
+        {(couponsEnabled || cashbackEnabled || loyaltyPointsEnabled) && <div className="mt-3 grid grid-cols-2 gap-2">
+          {couponsEnabled&&<label className="flex min-w-0 flex-col gap-1"><span className={labelClass}>Cupom</span><input value={couponCode} onChange={(e) => onCouponCodeChange(e.target.value.toUpperCase())} placeholder="EX.: BEMVINDO10" className={fieldClass} /></label>}
+          {cashbackEnabled&&<label className="flex flex-col gap-1"><span className={labelClass}>Cashback</span><input type="number" min="0" step="0.01" max={Number(customer?.cashbackBalance ?? 0)} disabled={!customer} value={cashbackToUse || ''} onChange={(e) => onCashbackToUseChange(Math.max(0, Number(e.target.value)))} placeholder={customer ? brl(Number(customer.cashbackBalance ?? 0)) : 'Cliente'} className={`${fieldClass} tabular-nums`} /></label>}
+          {loyaltyPointsEnabled&&<label className="flex flex-col gap-1"><span className={labelClass}>Usar pontos</span><input type="number" min="0" step="1" max={Number(customer?.loyaltyPoints ?? 0)} disabled={!customer} value={pointsToUse||''} onChange={(e)=>onPointsToUseChange(Math.max(0,Math.floor(Number(e.target.value))))} placeholder={customer?`${customer.loyaltyPoints??0} disponíveis`:'Cliente'} className={`${fieldClass} tabular-nums`}/></label>}
+          <button type="button" disabled={applyingBenefits || (!couponCode.trim() && cashbackToUse <= 0 && pointsToUse<=0)} onClick={onApplyBenefits} className="mt-[1.05rem] h-10 rounded-lg border border-brand px-3 text-xs font-bold text-accent disabled:opacity-40">{applyingBenefits ? 'Validando...' : 'Aplicar benefícios'}</button>
+        </div>}
 
         <dl className="mt-4 flex flex-col gap-1.5 text-sm">
           <div className="flex justify-between">
@@ -436,6 +466,7 @@ export function CartPanel({
               <dd className="tabular-nums text-good">− {brl(discount)}</dd>
             </div>
           )}
+          {benefitDiscount > 0 && <div className="flex justify-between"><dt className="text-good">Cupom e cashback</dt><dd className="tabular-nums text-good">− {brl(benefitDiscount)}</dd></div>}
           <div className="mt-1 flex items-baseline justify-between border-t border-line pt-2.5">
             <dt className="font-display text-lg text-plum">Total</dt>
             {/* O numero que o operador fala em voz alta. */}

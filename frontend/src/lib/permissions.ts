@@ -37,6 +37,8 @@ export const PERMISSION_LABELS: Record<string, string> = {
   'ingredients:view': 'Ver insumos e estoque',
   'ingredients:manage': 'Lançar entrada e ajustar estoque',
   'invoices:manage': 'Importar notas fiscais',
+  'purchases:view': 'Ver fornecedores e pedidos de compra',
+  'purchases:manage': 'Criar, aprovar e receber compras',
   'customers:view': 'Ver clientes',
   'customers:manage': 'Criar e editar clientes',
   'pricing:view': 'Ver preços e simulador',
@@ -46,7 +48,8 @@ export const PERMISSION_LABELS: Record<string, string> = {
   'cash:close': 'Fazer sangria e fechar o caixa',
   'payables:view': 'Ver contas a pagar',
   'payables:manage': 'Lançar contas e dar baixa em pagamento',
-  'delivery:manage': 'Configurar bairros e taxas',
+  'delivery:manage': 'Gerenciar entregas, entregadores e taxas',
+  'delivery:drive': 'Usar a área móvel do entregador',
   'printer:manage': 'Configurar impressora',
   'store:toggle': 'Abrir e fechar a loja',
 }

@@ -24,6 +24,11 @@ export function tenantRoom(tenantId: string) {
 export type RealtimeEvent =
   | 'order:created'
   | 'order:status'
+  | 'order:item-status'
+  | 'order:priority'
+  | 'order:kitchen-printed'
+  | 'delivery:updated'
+  | 'purchase:updated'
   | 'order:cancelled'
   | 'store:status'
   | 'stock:low'

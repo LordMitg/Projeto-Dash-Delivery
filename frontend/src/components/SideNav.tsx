@@ -30,6 +30,7 @@ import {
   LayoutDashboard,
   LogOut,
   MapPin,
+  Bike,
   Package,
   PanelLeft,
   Printer,
@@ -85,6 +86,7 @@ export const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
         anyPermission: ['orders:view', 'reports:view'],
       },
       { to: '/cozinha', label: 'Cozinha', icon: ChefHat, permission: 'kitchen:view' },
+      { to: '/entregas', label: 'Entregas', icon: Bike, permission: 'delivery:manage' },
       {
         to: '/scanner',
         label: 'Scanner',
@@ -98,12 +100,15 @@ export const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
     items: [
       { to: '/cardapio', label: 'Cardápio', icon: BookOpen, permission: 'products:view' },
       { to: '/insumos', label: 'Insumos', icon: Package, permission: 'ingredients:view' },
+      { to: '/compras', label: 'Compras', icon: ShoppingCart, anyPermission: ['purchases:view', 'purchases:manage'] },
+      { to: '/clientes', label: 'Clientes', icon: Users, permission: 'customers:view' },
       { to: '/notas', label: 'Notas fiscais', icon: Receipt, permission: 'invoices:manage' },
     ],
   },
   {
     title: 'Gestão',
     items: [
+      { to: '/financeiro', label: 'Financeiro', icon: Wallet, anyPermission: ['reports:view','payables:view','payables:manage','cash:close'] },
       { to: '/', label: 'Visão geral', icon: BarChart3, permission: 'reports:view' },
       {
         to: '/indicadores',

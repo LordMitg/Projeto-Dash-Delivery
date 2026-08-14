@@ -17,6 +17,7 @@ import {
   asyncHandler,
   ok,
   createdResponse,
+  badRequest,
   notFound,
   conflict,
   tenantOf,
@@ -28,6 +29,14 @@ import { validate, z, idParam, money, quantity, booleanish } from '../lib/valida
 const router = Router()
 
 const dec = (v: number) => new Prisma.Decimal(v.toFixed(4))
+
+const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Informe uma data valida')
+
+function parseDateOnly(value: string) {
+  const date = new Date(`${value}T12:00:00.000Z`)
+  if (Number.isNaN(date.getTime())) throw badRequest('Data invalida')
+  return date
+}
 
 // ---------------------------------------------------------------------------
 // GET /api/ingredients — lista
@@ -103,6 +112,188 @@ router.get(
     })
 
     return ok(res, serialize(movements))
+  }),
+)
+
+// ---------------------------------------------------------------------------
+// LOTES E VALIDADE
+// ---------------------------------------------------------------------------
+
+const lotListQuery = z.object({
+  ingredientId: z.string().trim().optional(),
+  status: z.enum(['all', 'active', 'expiring', 'expired']).default('all'),
+  days: z.coerce.number().int().min(1).max(365).default(30),
+})
+
+router.get(
+  '/lots',
+  validate({ query: lotListQuery }),
+  asyncHandler(async (req, res) => {
+    const tenantId = tenantOf(req)
+    const { ingredientId, status, days } = req.query as unknown as z.infer<typeof lotListQuery>
+    const now = new Date()
+    const limit = new Date(now)
+    limit.setDate(limit.getDate() + days)
+
+    const lots = await prisma.stockLot.findMany({
+      where: {
+        tenantId,
+        ...(ingredientId ? { ingredientId } : {}),
+        ...(status === 'active' ? { active: true, quantity: { gt: 0 } } : {}),
+        ...(status === 'expired' ? { active: true, quantity: { gt: 0 }, expiresAt: { lt: now } } : {}),
+        ...(status === 'expiring' ? { active: true, quantity: { gt: 0 }, expiresAt: { gte: now, lte: limit } } : {}),
+      },
+      include: { ingredient: { select: { id: true, name: true, sku: true, unit: true } } },
+      orderBy: [{ expiresAt: 'asc' }, { createdAt: 'desc' }],
+    })
+    return ok(res, serialize(lots))
+  }),
+)
+
+const lotCreateSchema = z.object({
+  ingredientId: z.string().min(1, 'Escolha o insumo'),
+  code: z.string().trim().min(1, 'Informe o lote').max(60),
+  quantity: quantity.refine((value) => value > 0, 'Quantidade deve ser maior que zero'),
+  expiresAt: dateOnly.nullish(),
+  unitCost: money.nullish(),
+  notes: z.string().trim().max(300).nullish(),
+})
+
+router.post(
+  '/lots',
+  requireStockAccess,
+  validate({ body: lotCreateSchema }),
+  asyncHandler(async (req, res) => {
+    const tenantId = tenantOf(req)
+    const body = req.body as z.infer<typeof lotCreateSchema>
+    const ingredient = await prisma.ingredient.findFirst({ where: { id: body.ingredientId, tenantId, active: true } })
+    if (!ingredient) throw notFound('Insumo nao encontrado')
+
+    const result = await prisma.$transaction(async (tx) => {
+      const newBalance = Number(ingredient.stock) + body.quantity
+      const lot = await tx.stockLot.create({
+        data: {
+          code: body.code,
+          quantity: dec(body.quantity),
+          expiresAt: body.expiresAt ? parseDateOnly(body.expiresAt) : null,
+          unitCost: body.unitCost == null ? null : dec(body.unitCost),
+          notes: body.notes ?? null,
+          tenantId,
+          ingredientId: ingredient.id,
+        },
+      })
+      await tx.ingredient.update({
+        where: { id: ingredient.id },
+        data: {
+          stock: dec(newBalance),
+          ...(body.unitCost != null ? { price: dec(body.unitCost) } : {}),
+        },
+      })
+      await tx.stockMovement.create({
+        data: {
+          type: 'entry', delta: dec(body.quantity), balanceBefore: ingredient.stock,
+          balanceAfter: dec(newBalance), reason: `Entrada do lote ${body.code}`,
+          sourceType: 'lot', sourceId: lot.id, tenantId, ingredientId: ingredient.id,
+          actorId: req.auth!.userId, lotId: lot.id,
+        },
+      })
+      return lot
+    })
+    return createdResponse(res, serialize(result))
+  }),
+)
+
+router.post(
+  '/lots/:id/discard',
+  requireStockAccess,
+  validate({ params: idParam, body: z.object({ quantity: quantity.refine((value) => value > 0), reason: z.string().trim().min(2).max(200) }) }),
+  asyncHandler(async (req, res) => {
+    const tenantId = tenantOf(req)
+    const id = String(req.params.id)
+    const { quantity: amount, reason } = req.body as { quantity: number; reason: string }
+    const lot = await prisma.stockLot.findFirst({ where: { id, tenantId }, include: { ingredient: true } })
+    if (!lot) throw notFound('Lote nao encontrado')
+    if (amount > Number(lot.quantity)) throw conflict('A quantidade informada e maior que o saldo do lote')
+    if (amount > Number(lot.ingredient.stock)) throw conflict('A quantidade e maior que o saldo total do insumo')
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const lotBalance = Number(lot.quantity) - amount
+      const stockBalance = Number(lot.ingredient.stock) - amount
+      const saved = await tx.stockLot.update({ where: { id }, data: { quantity: dec(lotBalance), active: lotBalance > 0 } })
+      await tx.ingredient.update({ where: { id: lot.ingredientId }, data: { stock: dec(stockBalance) } })
+      await tx.stockMovement.create({ data: {
+        type: 'loss', delta: dec(-amount), balanceBefore: lot.ingredient.stock,
+        balanceAfter: dec(stockBalance), reason, sourceType: 'lot', sourceId: id,
+        tenantId, ingredientId: lot.ingredientId, actorId: req.auth!.userId, lotId: id,
+      } })
+      return saved
+    })
+    return ok(res, serialize(updated))
+  }),
+)
+
+// ---------------------------------------------------------------------------
+// INVENTARIO FISICO
+// ---------------------------------------------------------------------------
+
+router.get(
+  '/inventories',
+  asyncHandler(async (req, res) => {
+    const tenantId = tenantOf(req)
+    const inventories = await prisma.inventoryCount.findMany({
+      where: { tenantId }, include: { items: { include: { ingredient: { select: { id: true, name: true, sku: true, unit: true } } } } },
+      orderBy: { createdAt: 'desc' }, take: 20,
+    })
+    return ok(res, serialize(inventories))
+  }),
+)
+
+const inventorySchema = z.object({
+  notes: z.string().trim().max(300).nullish(),
+  items: z.array(z.object({ ingredientId: z.string().min(1), countedQty: quantity })).min(1, 'Conte pelo menos um item'),
+})
+
+router.post(
+  '/inventories',
+  requireStockAccess,
+  validate({ body: inventorySchema }),
+  asyncHandler(async (req, res) => {
+    const tenantId = tenantOf(req)
+    const body = req.body as z.infer<typeof inventorySchema>
+    const ids = body.items.map((item) => item.ingredientId)
+    if (new Set(ids).size !== ids.length) throw badRequest('O mesmo insumo foi informado mais de uma vez')
+    const ingredients = await prisma.ingredient.findMany({ where: { tenantId, id: { in: ids } } })
+    if (ingredients.length !== ids.length) throw badRequest('Ha um insumo invalido nesta contagem')
+    const byId = new Map(ingredients.map((item) => [item.id, item]))
+    const reference = `INV-${Date.now().toString(36).toUpperCase()}`
+
+    const inventory = await prisma.$transaction(async (tx) => {
+      const differences = body.items.filter((item) => Number(byId.get(item.ingredientId)!.stock) !== item.countedQty).length
+      const created = await tx.inventoryCount.create({ data: {
+        reference, notes: body.notes ?? null, itemCount: body.items.length,
+        differenceCount: differences, actorId: req.auth!.userId, tenantId,
+      } })
+      for (const item of body.items) {
+        const ingredient = byId.get(item.ingredientId)!
+        const expected = Number(ingredient.stock)
+        const difference = item.countedQty - expected
+        await tx.inventoryCountItem.create({ data: {
+          expectedQty: ingredient.stock, countedQty: dec(item.countedQty), difference: dec(difference),
+          tenantId, inventoryId: created.id, ingredientId: ingredient.id,
+        } })
+        if (difference !== 0) {
+          await tx.ingredient.update({ where: { id: ingredient.id }, data: { stock: dec(item.countedQty) } })
+          await tx.stockMovement.create({ data: {
+            type: 'inventory', delta: dec(difference), balanceBefore: ingredient.stock,
+            balanceAfter: dec(item.countedQty), reason: `Inventario ${reference}`,
+            sourceType: 'inventory', sourceId: created.id, tenantId,
+            ingredientId: ingredient.id, actorId: req.auth!.userId,
+          } })
+        }
+      }
+      return tx.inventoryCount.findUnique({ where: { id: created.id }, include: { items: true } })
+    })
+    return createdResponse(res, serialize(inventory))
   }),
 )
 

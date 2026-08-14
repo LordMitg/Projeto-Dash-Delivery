@@ -34,6 +34,8 @@ export const PERMISSIONS = {
   'ingredients:view': 'Ver insumos e estoque',
   'ingredients:manage': 'Lançar entrada e ajustar estoque',
   'invoices:manage': 'Importar notas fiscais',
+  'purchases:view': 'Ver fornecedores e pedidos de compra',
+  'purchases:manage': 'Criar, aprovar e receber compras',
   'customers:view': 'Ver clientes',
   'customers:manage': 'Criar e editar clientes',
   'pricing:view': 'Ver preços e simulador',
@@ -46,7 +48,8 @@ export const PERMISSIONS = {
   'cash:close': 'Fazer sangria e fechar o caixa',
   'payables:view': 'Ver contas a pagar',
   'payables:manage': 'Lançar contas e dar baixa em pagamento',
-  'delivery:manage': 'Configurar bairros e taxas',
+  'delivery:manage': 'Gerenciar entregas, entregadores e taxas',
+  'delivery:drive': 'Usar a área móvel do entregador',
   'printer:manage': 'Configurar impressora',
   // Fechar a loja derruba o faturamento na hora: o cardapio para de aceitar
   // pedido. Merece chave propria — antes `PATCH /api/store/toggle` nao exigia
@@ -66,7 +69,7 @@ export const ALL_PERMISSIONS = Object.keys(PERMISSIONS) as Permission[]
 export const PERMISSION_GROUPS: { title: string; keys: Permission[] }[] = [
   { title: 'Operação', keys: ['pdv:use', 'kitchen:view', 'scanner:use', 'store:toggle'] },
   { title: 'Pedidos', keys: ['orders:view', 'orders:manage'] },
-  { title: 'Produtos e estoque', keys: ['products:view', 'products:manage', 'ingredients:view', 'ingredients:manage', 'invoices:manage'] },
+  { title: 'Produtos, estoque e compras', keys: ['products:view', 'products:manage', 'ingredients:view', 'ingredients:manage', 'invoices:manage', 'purchases:view', 'purchases:manage'] },
   { title: 'Clientes', keys: ['customers:view', 'customers:manage'] },
   {
     title: 'Financeiro',
@@ -76,7 +79,8 @@ export const PERMISSION_GROUPS: { title: string; keys: Permission[] }[] = [
       'payables:view', 'payables:manage',
     ],
   },
-  { title: 'Configurações', keys: ['delivery:manage', 'printer:manage'] },
+  { title: 'Entregas', keys: ['delivery:drive', 'delivery:manage'] },
+  { title: 'Configurações', keys: ['printer:manage'] },
 ]
 
 /**
@@ -92,6 +96,7 @@ export const ROLE_PRESETS = {
       'orders:view', 'orders:manage',
       'products:view', 'products:manage',
       'ingredients:view', 'ingredients:manage', 'invoices:manage',
+      'purchases:view', 'purchases:manage',
       'customers:view', 'customers:manage',
       'pricing:view', 'reports:view',
       'cash:operate', 'cash:close',
@@ -118,7 +123,7 @@ export const ROLE_PRESETS = {
   },
   delivery: {
     label: 'Entregador',
-    permissions: ['orders:view'],
+    permissions: ['delivery:drive'],
   },
   // `satisfies` (em vez de `: Record<string, ...>`) valida que toda chave acima
   // existe no catalogo E preserva os nomes dos presets, para `ROLE_PRESETS.manager`

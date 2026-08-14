@@ -27,6 +27,7 @@ type MenuData = {
   deliveryFeeBase: number | string
   deliveryZones: DeliveryZone[]
   categories: Category[]
+  loyalty: { couponsEnabled:boolean; loyaltyPointsEnabled:boolean; cashbackEnabled:boolean; pointsPerReal:number|string; pointRedemptionValue:number|string; cashbackPercent:number|string }
 }
 type CartItem = {
   key: string; product: Product; quantity: number; observations: string
@@ -34,6 +35,7 @@ type CartItem = {
   addons: Array<{ addonId: string; name: string; price: number; quantity: number }>
 }
 type Customer = { name: string; phone: string; address: string; neighborhood: string; city: string; state: string; zipCode: string }
+type CustomerAddress = { id?:string; label:string; address:string; neighborhood:string; city?:string|null; state?:string|null; zipCode?:string|null; isDefault?:boolean }
 type RecentOrder = { token: string; orderNumber: string; totalAmount: number; createdAt: string }
 
 const defaultTheme: StorefrontTheme = {
@@ -69,8 +71,14 @@ export default function PublicStorePage() {
   const [orderType, setOrderType] = useState<'delivery' | 'balcao'>('delivery')
   const [paymentMethod, setPaymentMethod] = useState<'pix' | 'cash' | 'credit' | 'debit'>('pix')
   const [changeFor, setChangeFor] = useState('')
+  const [couponCode, setCouponCode] = useState('')
+  const [cashbackToUse, setCashbackToUse] = useState(0)
+  const [pointsToUse,setPointsToUse]=useState(0)
+  const [benefitQuote, setBenefitQuote] = useState({ discount: 0, cashbackAvailable: 0, pointsAvailable:0, pointsToEarn: 0, cashbackToEarn: 0 })
+  const [quotingBenefits, setQuotingBenefits] = useState(false)
   const [customer, setCustomer] = useState<Customer>({ name: '', phone: '', address: '', neighborhood: '', city: '', state: '', zipCode: '' })
   const [lookupState, setLookupState] = useState<'idle' | 'loading' | 'found' | 'new'>('idle')
+  const [savedAddresses,setSavedAddresses]=useState<CustomerAddress[]>([])
   const [lastLookup, setLastLookup] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [checkoutError, setCheckoutError] = useState('')
@@ -121,7 +129,7 @@ export default function PublicStorePage() {
   const subtotal = cart.reduce((sum, item) => sum + itemTotal(item), 0)
   const selectedZone = menu?.deliveryZones.find((zone) => zone.name.toLocaleLowerCase('pt-BR') === customer.neighborhood.toLocaleLowerCase('pt-BR'))
   const deliveryFee = orderType === 'delivery' ? Number(selectedZone?.fee ?? menu?.deliveryFeeBase ?? 0) : 0
-  const total = subtotal + deliveryFee
+  const total = Math.max(0, subtotal + deliveryFee - benefitQuote.discount)
   const heroImage = theme.bannerImageUrl || featured.find((product) => product.imageUrl)?.imageUrl || ''
   const favoriteProducts = allProducts.filter((product) => favorites.includes(product.id))
 
@@ -161,12 +169,23 @@ export default function PublicStorePage() {
     if (phone.length < 10 || phone === lastLookup) return
     setLastLookup(phone); setLookupState('loading')
     try {
-      const result = await apiPost<{ found: boolean; profile: Customer | null }>('/api/public/customers/lookup', { phone })
+      const result = await apiPost<{ found: boolean; profile: (Customer & {addresses?:CustomerAddress[]}) | null }>('/api/public/customers/lookup', { phone })
       if (result.found && result.profile) {
         setCustomer((current) => ({ ...current, ...Object.fromEntries(Object.entries(result.profile!).map(([key, value]) => [key, value ?? ''])), phone }))
+        setSavedAddresses(result.profile.addresses??[])
         setLookupState('found')
       } else setLookupState('new')
     } catch { setLookupState('idle') }
+  }
+
+  async function applyBenefits() {
+    if (digits(customer.phone).length < 10) { setCheckoutError('Informe seu telefone antes de aplicar benefícios.'); return }
+    setQuotingBenefits(true); setCheckoutError('')
+    try {
+      const quote = await apiPost<typeof benefitQuote & { couponCode?: string | null }>(`/api/public/${encodeURIComponent(slug)}/benefits/quote`, { phone: digits(customer.phone), subtotal, couponCode: couponCode.trim() || null, cashbackToUse,pointsToUse })
+      setBenefitQuote(quote); if (quote.couponCode) setCouponCode(quote.couponCode)
+    } catch (err) { setBenefitQuote({ discount: 0, cashbackAvailable: 0,pointsAvailable:0, pointsToEarn: 0, cashbackToEarn: 0 }); setCheckoutError(errorMessage(err, 'Não foi possível aplicar o benefício.')) }
+    finally { setQuotingBenefits(false) }
   }
 
   async function submitOrder(event: React.FormEvent) {
@@ -179,6 +198,7 @@ export default function PublicStorePage() {
         items: cart.map((item) => ({ productId: item.product.id, quantity: item.quantity, observations: item.observations || null, selectedProteinId: item.selectedProteinId || null, addons: item.addons.map(({ addonId, quantity: addonQuantity }) => ({ addonId, quantity: addonQuantity })) })),
         customer: { ...customer, phone: digits(customer.phone) }, orderType, paymentMethod,
         changeFor: paymentMethod === 'cash' && changeFor ? Number(changeFor.replace(',', '.')) : null,
+        couponCode: couponCode.trim() || null, cashbackToUse,pointsToUse,
       })
       try {
         localStorage.setItem(`delione_order_${result.publicToken}`, JSON.stringify({ token: result.publicToken, slug }))
@@ -270,11 +290,12 @@ export default function PublicStorePage() {
         <form onSubmit={submitOrder} className="flex min-h-0 flex-1 flex-col"><div className="flex-1 space-y-5 overflow-y-auto p-5"><button type="button" onClick={() => setCheckout(false)} className="!p-0 text-sm font-semibold opacity-65"><ArrowLeft className="h-4 w-4" /> Voltar ao carrinho</button>
           <fieldset><legend className="mb-2 font-bold">Como deseja receber?</legend><div className="grid grid-cols-2 gap-2"><Choice active={orderType === 'delivery'} onClick={() => setOrderType('delivery')} icon={<Truck className="h-5 w-5" />} label="Entrega" theme={theme} /><Choice active={orderType === 'balcao'} onClick={() => setOrderType('balcao')} icon={<Store className="h-5 w-5" />} label="Retirada" theme={theme} /></div></fieldset>
           <fieldset className="space-y-3"><legend className="font-bold">Seus dados</legend><label><span>Telefone</span><div className="relative"><input required inputMode="tel" value={customer.phone} onChange={(e) => { setCustomer({ ...customer, phone: e.target.value }); setLookupState('idle') }} onBlur={() => void lookupCustomer()} placeholder="(11) 99999-9999" className="pr-28" />{lookupState === 'loading' && <span className="absolute right-3 top-2.5 text-xs opacity-50">Buscando...</span>}{lookupState === 'found' && <span className="absolute right-3 top-2.5 text-xs font-bold text-green-700">Cadastro encontrado</span>}</div></label><label><span>Nome</span><input required value={customer.name} onChange={(e) => setCustomer({ ...customer, name: e.target.value })} placeholder="Como podemos chamar você?" /></label>
-          {orderType === 'delivery' && <><label><span>Endereço e número</span><input required value={customer.address} onChange={(e) => setCustomer({ ...customer, address: e.target.value })} placeholder="Rua, número e complemento" /></label><label><span>Bairro</span>{menu.deliveryZones.length > 0 ? <select required value={customer.neighborhood} onChange={(e) => setCustomer({ ...customer, neighborhood: e.target.value })}><option value="">Selecione...</option>{menu.deliveryZones.map((zone) => <option key={zone.name} value={zone.name}>{zone.name} · {money.format(Number(zone.fee))}</option>)}</select> : <input required value={customer.neighborhood} onChange={(e) => setCustomer({ ...customer, neighborhood: e.target.value })} />}</label><div className="grid grid-cols-[1fr_80px] gap-2"><label><span>Cidade</span><input value={customer.city} onChange={(e) => setCustomer({ ...customer, city: e.target.value })} /></label><label><span>UF</span><input maxLength={2} value={customer.state} onChange={(e) => setCustomer({ ...customer, state: e.target.value.toUpperCase() })} /></label></div></>}
+          {orderType === 'delivery' && <>{savedAddresses.length>0&&<label><span>Endereços salvos</span><select value="" onChange={e=>{const selected=savedAddresses.find(a=>a.id===e.target.value);if(selected)setCustomer(c=>({...c,address:selected.address,neighborhood:selected.neighborhood,city:selected.city||'',state:selected.state||'',zipCode:selected.zipCode||''}))}}><option value="">Escolha um endereço...</option>{savedAddresses.map(a=><option key={a.id} value={a.id}>{a.label} · {a.address}</option>)}</select></label>}<label><span>Endereço e número</span><input required value={customer.address} onChange={(e) => setCustomer({ ...customer, address: e.target.value })} placeholder="Rua, número e complemento" /></label><label><span>Bairro</span>{menu.deliveryZones.length > 0 ? <select required value={customer.neighborhood} onChange={(e) => setCustomer({ ...customer, neighborhood: e.target.value })}><option value="">Selecione...</option>{menu.deliveryZones.map((zone) => <option key={zone.name} value={zone.name}>{zone.name} · {money.format(Number(zone.fee))}</option>)}</select> : <input required value={customer.neighborhood} onChange={(e) => setCustomer({ ...customer, neighborhood: e.target.value })} />}</label><div className="grid grid-cols-[1fr_80px] gap-2"><label><span>Cidade</span><input value={customer.city} onChange={(e) => setCustomer({ ...customer, city: e.target.value })} /></label><label><span>UF</span><input maxLength={2} value={customer.state} onChange={(e) => setCustomer({ ...customer, state: e.target.value.toUpperCase() })} /></label></div></>}
           </fieldset>
           <fieldset><legend className="mb-2 font-bold">Pagamento</legend><div className="grid grid-cols-2 gap-2">{([['pix', 'Pix'], ['credit', 'Crédito'], ['debit', 'Débito'], ['cash', 'Dinheiro']] as const).map(([value, label]) => <Choice key={value} active={paymentMethod === value} onClick={() => setPaymentMethod(value)} icon={paymentMethod === value ? <Check className="h-4 w-4" /> : <span className="h-4 w-4 rounded-full border" />} label={label} theme={theme} />)}</div>{paymentMethod === 'cash' && <label className="mt-3"><span>Troco para quanto? (opcional)</span><input inputMode="decimal" value={changeFor} onChange={(e) => setChangeFor(e.target.value)} placeholder="Ex.: 100,00" /></label>}<p className="mt-2 text-xs opacity-55">O pedido fica aguardando a confirmação do pagamento pela loja.</p></fieldset>
+          {(menu.loyalty.couponsEnabled||menu.loyalty.cashbackEnabled||menu.loyalty.loyaltyPointsEnabled)&&<div className="rounded-2xl border border-black/10 p-4"><p className="font-bold">Benefícios da loja</p><div className="mt-3 grid grid-cols-2 gap-2">{menu.loyalty.couponsEnabled&&<input value={couponCode} onChange={(e) => { setCouponCode(e.target.value.toUpperCase()); setBenefitQuote(v => ({...v,discount:0})) }} placeholder="Código do cupom"/>}{menu.loyalty.cashbackEnabled&&<input type="number" min="0" step="0.01" value={cashbackToUse || ''} onChange={(e) => { setCashbackToUse(Math.max(0,Number(e.target.value))); setBenefitQuote(v => ({...v,discount:0})) }} placeholder="Usar cashback"/>}{menu.loyalty.loyaltyPointsEnabled&&<input type="number" min="0" step="1" value={pointsToUse||''} onChange={e=>{setPointsToUse(Math.max(0,Math.floor(Number(e.target.value))));setBenefitQuote(v=>({...v,discount:0}))}} placeholder="Usar pontos"/>}</div><button type="button" disabled={quotingBenefits} onClick={() => void applyBenefits()} className="mt-2 w-full justify-center rounded-xl border py-2 text-sm font-bold" style={{borderColor:theme.primaryColor,color:theme.primaryColor}}>{quotingBenefits?'Validando...':'Aplicar benefícios'}</button>{benefitQuote.cashbackAvailable>0&&<p className="mt-2 text-xs opacity-60">Cashback disponível: {money.format(benefitQuote.cashbackAvailable)}.</p>}{benefitQuote.pointsAvailable>0&&<p className="mt-1 text-xs opacity-60">Pontos disponíveis: {benefitQuote.pointsAvailable}.</p>}{benefitQuote.discount>0&&<p className="mt-2 text-sm font-bold text-green-700">Economia aplicada: {money.format(benefitQuote.discount)}{(benefitQuote.pointsToEarn>0||benefitQuote.cashbackToEarn>0)&&` · Você ganhará ${benefitQuote.pointsToEarn} pontos + ${money.format(benefitQuote.cashbackToEarn)}`}</p>}</div>}
           {checkoutError && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{checkoutError}</div>}
-        </div><div className="border-t border-black/10 bg-white p-5"><div className="space-y-1 text-sm"><div className="flex justify-between"><span>Itens</span><span>{money.format(subtotal)}</span></div><div className="flex justify-between"><span>Entrega</span><span>{orderType === 'delivery' ? money.format(deliveryFee) : 'Grátis'}</span></div><div className="flex justify-between pt-2 text-xl"><strong>Total</strong><strong>{money.format(total)}</strong></div></div><button type="submit" disabled={submitting || !menu.status.open} className="mt-4 w-full justify-center rounded-xl py-4 text-base font-extrabold text-white" style={{ backgroundColor: theme.primaryColor }}>{submitting ? 'Enviando pedido...' : 'Fazer pedido'} <ShoppingBag className="h-5 w-5" /></button></div></form>}
+        </div><div className="border-t border-black/10 bg-white p-5"><div className="space-y-1 text-sm"><div className="flex justify-between"><span>Itens</span><span>{money.format(subtotal)}</span></div><div className="flex justify-between"><span>Entrega</span><span>{orderType === 'delivery' ? money.format(deliveryFee) : 'Grátis'}</span></div>{benefitQuote.discount>0&&<div className="flex justify-between text-green-700"><span>Cupom e cashback</span><span>− {money.format(benefitQuote.discount)}</span></div>}<div className="flex justify-between pt-2 text-xl"><strong>Total</strong><strong>{money.format(total)}</strong></div></div><button type="submit" disabled={submitting || !menu.status.open} className="mt-4 w-full justify-center rounded-xl py-4 text-base font-extrabold text-white" style={{ backgroundColor: theme.primaryColor }}>{submitting ? 'Enviando pedido...' : 'Fazer pedido'} <ShoppingBag className="h-5 w-5" /></button></div></form>}
       </aside></div>}
     </div>
   )

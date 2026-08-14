@@ -38,6 +38,7 @@ interface Employee {
   email: string
   firstName: string
   lastName: string
+  phone?: string | null
   active: boolean
   role: string
   permissions: string[]
@@ -289,6 +290,9 @@ function EmployeeDialog({
   const [lastName, setLastName] = useState(employee?.lastName ?? '')
   const [email, setEmail] = useState(employee?.email ?? '')
   const [password, setPassword] = useState('')
+  const [phone, setPhone] = useState(employee?.phone ?? '')
+  const [vehicleType, setVehicleType] = useState('moto')
+  const [plate, setPlate] = useState('')
   const [selected, setSelected] = useState<string[]>(employee?.permissions ?? [])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -306,6 +310,7 @@ function EmployeeDialog({
     setLastName(employee?.lastName ?? '')
     setEmail(employee?.email ?? '')
     setPassword('')
+    setPhone(employee?.phone ?? '')
     setSelected(employee?.permissions ?? [])
     setError('')
   }, [employee?.membershipId])
@@ -330,6 +335,7 @@ function EmployeeDialog({
         await apiPatch(`/api/users/${employee.membershipId}`, {
           firstName: firstName.trim(),
           lastName: lastName.trim(),
+          phone: phone.trim(),
           permissions: selected,
           // Só envia senha quando o dono digitou algo: string vazia seria
           // recusada pelo minimo de 6 caracteres.
@@ -342,6 +348,10 @@ function EmployeeDialog({
           lastName: lastName.trim(),
           email: email.trim(),
           password,
+          phone: phone.trim(),
+          vehicleType,
+          plate: plate.trim(),
+          preset: selected.includes('delivery:drive') ? 'delivery' : undefined,
           permissions: selected,
         })
         await onSaved(
@@ -418,6 +428,15 @@ function EmployeeDialog({
               />
             </div>
           </div>
+
+          {selected.includes('delivery:drive') && (
+            <div className="grid gap-3 rounded-xl border border-brand/25 bg-brand-soft/40 p-4 sm:grid-cols-3">
+              <div className="sm:col-span-3"><p className="text-sm font-semibold text-ink">Dados do entregador</p><p className="text-xs text-slate">Esse acesso abre somente o leitor de QR Codes e a rota das entregas.</p></div>
+              <label className="flex flex-col gap-1.5 text-sm font-medium text-ink">Telefone<input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(11) 99999-9999" className="rounded-lg border border-line bg-canvas px-3 py-2.5 text-sm" /></label>
+              <label className="flex flex-col gap-1.5 text-sm font-medium text-ink">Veículo<select value={vehicleType} onChange={(e) => setVehicleType(e.target.value)} className="rounded-lg border border-line bg-canvas px-3 py-2.5 text-sm"><option value="moto">Moto</option><option value="carro">Carro</option><option value="bicicleta">Bicicleta</option><option value="a_pe">A pé</option></select></label>
+              <label className="flex flex-col gap-1.5 text-sm font-medium text-ink">Placa (opcional)<input value={plate} onChange={(e) => setPlate(e.target.value.toUpperCase())} className="rounded-lg border border-line bg-canvas px-3 py-2.5 text-sm" /></label>
+            </div>
+          )}
 
           <div className="flex flex-wrap gap-3">
             <div className="flex min-w-[12rem] flex-1 flex-col gap-1.5">

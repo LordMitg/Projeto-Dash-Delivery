@@ -20,7 +20,14 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
     "db:reset": "prisma migrate reset --force",
-    "test:security": "node scripts/test-security.mjs"
+    "test:security": "node scripts/test-security.mjs",
+    "test:purchases-delivery": "node scripts/test-purchases-delivery.mjs",
+    "test:quick-purchase": "node scripts/test-quick-purchase.mjs",
+    "test:stock-inventory": "node scripts/test-stock-inventory.mjs",
+    "test:customer-crm": "node scripts/test-customer-crm.mjs",
+    "test:loyalty-coupons": "node scripts/test-loyalty-coupons.mjs",
+    "test:driver-routing": "node scripts/test-driver-routing.mjs",
+    "demo:driver": "node scripts/create-driver-demo.mjs"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",

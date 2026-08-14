@@ -17,6 +17,7 @@ import { applyStockDeduction, type StockConsumption } from '../services/stockSer
 import { publicCheckoutLimiter } from '../middleware/rateLimit.js'
 import { emitToTenant } from '../lib/realtime.js'
 import { env } from '../config/env.js'
+import { applyCustomerRewards, quoteBenefits } from '../services/loyaltyService.js'
 
 const router = Router()
 const dec = (value: number) => new Prisma.Decimal(value.toFixed(2))
@@ -49,6 +50,12 @@ async function findStoreBySlug(slug: string) {
       deliveryZones: true,
       logoData: true,
       storefrontTheme: true,
+      couponsEnabled: true,
+      loyaltyPointsEnabled: true,
+      cashbackEnabled: true,
+      pointsPerReal: true,
+      pointRedemptionValue: true,
+      cashbackPercent: true,
     },
   })
 
@@ -173,6 +180,14 @@ router.get(
       status,
       deliveryFeeBase: store.deliveryFeeBase,
       deliveryZones: store.deliveryZones ?? [],
+      loyalty: {
+        couponsEnabled: store.couponsEnabled,
+        loyaltyPointsEnabled: store.loyaltyPointsEnabled,
+        cashbackEnabled: store.cashbackEnabled,
+        pointsPerReal: store.pointsPerReal,
+        pointRedemptionValue: store.pointRedemptionValue,
+        cashbackPercent: store.cashbackPercent,
+      },
       categories: groups,
     })
   }),
@@ -237,7 +252,21 @@ const publicCheckoutSchema = z.object({
   paymentMethod: z.enum(['cash', 'pix', 'credit', 'debit']).default('pix'),
   changeFor: z.coerce.number().min(0).nullish(),
   observations: z.string().trim().max(500).nullish(),
+  couponCode: z.string().trim().max(30).nullish(),
+  cashbackToUse: z.coerce.number().min(0).default(0),
+  pointsToUse: z.coerce.number().int().min(0).default(0),
 })
+
+router.post(
+  '/:slug/benefits/quote', publicCheckoutLimiter,
+  validate({ body: z.object({ phone: z.string().trim().min(8), subtotal: z.coerce.number().min(0), couponCode: z.string().trim().max(30).nullish(), cashbackToUse: z.coerce.number().min(0).default(0), pointsToUse:z.coerce.number().int().min(0).default(0) }) }),
+  asyncHandler(async (req, res) => {
+    const store = await findStoreBySlug(String(req.params.slug ?? ''))
+    const phone = normalizePhone(String(req.body.phone)); const subtotal = Number(req.body.subtotal); const customer = await prisma.customer.findFirst({ where: { tenantId: store.id, phone } })
+    const quote=await quoteBenefits(prisma,{tenantId:store.id,customerId:customer?.id,subtotal,couponCode:req.body.couponCode,cashbackToUse:req.body.cashbackToUse,pointsToUse:req.body.pointsToUse})
+    return ok(res,{...quote,coupon:undefined,customer:undefined})
+  }),
+)
 
 /**
  * Reconhece o consumidor entre lojas pelo telefone, como nos apps de delivery.
@@ -261,6 +290,7 @@ router.post(
         city: true,
         state: true,
         zipCode: true,
+        addresses: { orderBy: [{ isDefault:'desc' }, { createdAt:'asc' }] },
       },
     })
     return ok(res, { found: Boolean(profile), profile })
@@ -358,6 +388,9 @@ router.post(
         selectedProteinName,
         addons: frozenAddons.length ? frozenAddons as unknown as Prisma.InputJsonValue : undefined,
         addonsTotal: dec(addonTotal),
+        productionStatus: 'pending',
+        preparationStation: product.preparationStation || 'Cozinha',
+        preparationTimeMinutes: product.preparationTimeMinutes || 15,
       })
     }
 
@@ -371,7 +404,12 @@ router.post(
       throw badRequest(`O pedido minimo para ${delivery.zone.name} e R$ ${delivery.zone.minOrder.toFixed(2)}.`)
     }
 
-    const total = Math.round((subtotal + deliveryFee) * 100) / 100
+    const benefitCustomer = await prisma.customer.findFirst({ where: { tenantId: store.id, phone: normalizedPhone } })
+    const loyaltyQuote=await quoteBenefits(prisma,{tenantId:store.id,customerId:benefitCustomer?.id,subtotal,couponCode:body.couponCode,cashbackToUse:body.cashbackToUse,pointsToUse:body.pointsToUse})
+    const appliedCoupon = loyaltyQuote.coupon
+    const discount = loyaltyQuote.discount
+    const total = Math.round((subtotal + deliveryFee - discount) * 100) / 100
+    const pointsEarned = loyaltyQuote.config.loyaltyPointsEnabled?Math.floor(total*loyaltyQuote.config.pointsPerReal):0; const cashbackEarned = loyaltyQuote.config.cashbackEnabled?Math.round(total*loyaltyQuote.config.cashbackPercent)/100:0
     let changeAmount: number | null = null
     if (body.paymentMethod === 'cash' && body.changeFor != null) {
       if (body.changeFor < total) throw badRequest('O valor para troco e menor que o total do pedido.')
@@ -386,7 +424,7 @@ router.post(
     })
 
     const order = await prisma.$transaction(async (tx) => {
-      await tx.consumerProfile.upsert({
+      const consumerProfile = await tx.consumerProfile.upsert({
         where: { phone: normalizedPhone },
         create: {
           phone: normalizedPhone,
@@ -406,6 +444,13 @@ router.post(
           zipCode: body.customer.zipCode || null,
         },
       })
+      if (body.orderType === 'delivery') {
+        const saved = await tx.consumerAddress.findFirst({ where: { consumerProfileId:consumerProfile.id, address:body.customer.address, neighborhood:body.customer.neighborhood } })
+        if (!saved) {
+          const count=await tx.consumerAddress.count({where:{consumerProfileId:consumerProfile.id}})
+          await tx.consumerAddress.create({data:{consumerProfileId:consumerProfile.id,label:count===0?'Principal':`Endereço ${count+1}`,address:body.customer.address,neighborhood:body.customer.neighborhood,city:body.customer.city||null,state:body.customer.state.toUpperCase()||null,zipCode:body.customer.zipCode||null,isDefault:count===0}})
+        }
+      }
 
       const existingCustomer = await tx.customer.findFirst({
         where: { tenantId: store.id, phone: normalizedPhone },
@@ -432,6 +477,10 @@ router.post(
           state: body.customer.state.toUpperCase() || null,
           zipCode: body.customer.zipCode || null,
         } })
+      if (body.orderType === 'delivery') {
+        const saved=await tx.customerAddress.findFirst({where:{customerId:customer.id,tenantId:store.id,address:body.customer.address,neighborhood:body.customer.neighborhood}})
+        if(!saved){const count=await tx.customerAddress.count({where:{customerId:customer.id,tenantId:store.id}});await tx.customerAddress.create({data:{tenantId:store.id,customerId:customer.id,label:count===0?'Principal':`Endereço ${count+1}`,address:body.customer.address,neighborhood:body.customer.neighborhood,city:body.customer.city||null,state:body.customer.state.toUpperCase()||null,zipCode:body.customer.zipCode||null,isDefault:count===0}})}
+      }
 
       await applyStockDeduction(tx, store.id, consumptions, env.ALLOW_NEGATIVE_STOCK)
 
@@ -444,6 +493,9 @@ router.post(
           subtotal: dec(subtotal),
           deliveryFee: dec(deliveryFee),
           totalAmount: dec(total),
+          discount: dec(discount), couponCode: appliedCoupon?.coupon.code ?? null,
+          cashbackUsed: dec(body.cashbackToUse), pointsEarned, cashbackEarned: dec(cashbackEarned),
+          pointsUsed: body.pointsToUse,
           paymentMethod: body.paymentMethod,
           paymentStatus: 'pending',
           changeFor: body.changeFor != null ? dec(body.changeFor) : null,
@@ -483,6 +535,8 @@ router.post(
         where: { id: customer.id },
         data: { ltv: { increment: total }, totalOrders: { increment: 1 }, lastOrderAt: new Date() },
       })
+      await applyCustomerRewards(tx, { tenantId: store.id, customerId: customer.id, orderId: createdOrder.id, total, cashbackUsed: body.cashbackToUse, pointsUsed:body.pointsToUse })
+      if (appliedCoupon) { await tx.coupon.update({ where: { id: appliedCoupon.coupon.id }, data: { usageCount: { increment: 1 } } }); await tx.couponRedemption.create({ data: { amount: dec(appliedCoupon.amount), tenantId: store.id, couponId: appliedCoupon.coupon.id, customerId: customer.id, orderId: createdOrder.id } }) }
 
       return createdOrder
     })
@@ -494,6 +548,9 @@ router.post(
       status: order.status,
       totalAmount: total,
       deliveryFee,
+      discount,
+      pointsEarned,
+      cashbackEarned,
     })
   }),
 )
@@ -517,6 +574,20 @@ router.get(
         paymentMethod: true,
         paymentStatus: true,
         deliveryAddress: true,
+        delivery: {
+          select: {
+            status: true,
+            estimatedTime: true,
+            pickedUpAt: true,
+            estimatedArrivalAt: true,
+            destinationLatitude: true,
+            destinationLongitude: true,
+            deliveryCode: true,
+            dispatchMode: true,
+            externalCourierName: true,
+            courier: { select: { name: true, vehicleType: true, currentLatitude: true, currentLongitude: true, locationUpdatedAt: true } },
+          },
+        },
         createdAt: true,
         updatedAt: true,
         orderItems: {

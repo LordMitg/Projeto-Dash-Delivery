@@ -32,8 +32,13 @@ import ingredientRoutes from './routes/ingredientRoutes.js'
 import productRoutes from './routes/productRoutes.js'
 import menuRoutes from './routes/menuRoutes.js'
 import orderRoutes from './routes/orderRoutes.js'
+import kitchenRoutes from './routes/kitchenRoutes.js'
+import deliveryRoutes from './routes/deliveryRoutes.js'
+import driverRoutes from './routes/driverRoutes.js'
+import purchaseRoutes from './routes/purchaseRoutes.js'
 import customerRoutes from './routes/customerRoutes.js'
 import financialRoutes from './routes/financialRoutes.js'
+import financeCenterRoutes from './routes/financeCenterRoutes.js'
 import dashboardRoutes from './routes/dashboardRoutes.js'
 import cashRoutes from './routes/cashRoutes.js'
 import payableRoutes from './routes/payableRoutes.js'
@@ -151,6 +156,12 @@ app.use(
 app.use('/api/products', authenticate, requirePermission('products:view', 'pdv:use'), productRoutes)
 app.use('/api/menu', authenticate, requirePermission('products:view', 'pdv:use'), menuRoutes)
 app.use('/api/orders', authenticate, requirePermission('orders:view', 'pdv:use'), orderRoutes)
+// A API do KDS altera producao, prioridade e impressao. `orders:view` sozinho
+// continua sendo leitura; somente quem recebeu acesso a cozinha opera esta fila.
+app.use('/api/kitchen', authenticate, requirePermission('kitchen:view'), kitchenRoutes)
+app.use('/api/deliveries', authenticate, requirePermission('delivery:manage'), deliveryRoutes)
+app.use('/api/driver', authenticate, requirePermission('delivery:drive'), driverRoutes)
+app.use('/api/purchases', authenticate, requirePermission('purchases:view', 'purchases:manage'), purchaseRoutes)
 // O PDV chamava esta rota desde sempre, mas ela nao existia: 404 em toda busca
 // por telefone, e todo cliente recorrente era cadastrado de novo.
 app.use('/api/customers', authenticate, requirePermission('customers:view', 'pdv:use'), customerRoutes)
@@ -165,6 +176,7 @@ app.use('/api/pricing', authenticate, requirePermission('pricing:view'), pricing
 // (Ajustes), entao aqui exige apenas login: cada rota interna aplica o seu guard.
 app.use('/api/store', authenticate, storeRoutes)
 app.use('/api/financial', authenticate, requireFinancialAccess, financialRoutes)
+app.use('/api/finance-center', authenticate, requirePermission('reports:view', 'payables:view', 'payables:manage', 'cash:close'), financeCenterRoutes)
 /**
  * Painel de Visao geral. Exige `reports:view` OU `orders:view` — de proposito
  * mais frouxo que `/api/financial`, que passa pelo `requireFinancialAccess`.

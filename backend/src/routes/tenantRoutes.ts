@@ -39,6 +39,12 @@ const tenantSelect = {
   deliveryFeeBase: true,
   deliveryZones: true,
   printSettings: true,
+  couponsEnabled: true,
+  loyaltyPointsEnabled: true,
+  cashbackEnabled: true,
+  pointsPerReal: true,
+  pointRedemptionValue: true,
+  cashbackPercent: true,
 } as const
 
 async function uniqueSlug(name: string): Promise<string> {

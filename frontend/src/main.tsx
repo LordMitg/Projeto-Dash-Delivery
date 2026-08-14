@@ -5,6 +5,7 @@ import { AuthProvider } from './context/AuthContext'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { App } from './pages/App'
 import './index.css'
+import 'leaflet/dist/leaflet.css'
 
 /**
  * A ordem dos provedores importa: o roteador precisa envolver o AuthProvider

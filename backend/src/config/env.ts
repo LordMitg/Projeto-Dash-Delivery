@@ -48,6 +48,10 @@ const envSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((value) => value === 'true'),
+
+  ROUTING_BASE_URL: z.string().url().default('https://router.project-osrm.org'),
+  GEOCODING_BASE_URL: z.string().url().default('https://nominatim.openstreetmap.org'),
+  MAPS_USER_AGENT: z.string().min(3).default('DeliOne/1.0 (delivery routing)'),
 })
 
 const parsed = envSchema.safeParse(process.env)

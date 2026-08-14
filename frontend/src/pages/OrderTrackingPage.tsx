@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Check, ChefHat, Clock3, Home, PackageCheck, ShoppingBag, Store, Truck, XCircle } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
 import { apiGet, errorMessage } from '../lib/api'
+import { DeliveryMap } from '../components/delivery/DeliveryMap'
 
 interface Theme { primaryColor?: string; accentColor?: string; backgroundColor?: string; textColor?: string }
 interface TrackedOrder {
   orderNumber: string; status: string; orderType: string; subtotal: number | string; deliveryFee: number | string
   totalAmount: number | string; paymentMethod: string; paymentStatus: string; deliveryAddress?: string | null
   createdAt: string; updatedAt: string
+  delivery?: { status: string; estimatedTime?: string | null; estimatedArrivalAt?: string | null; pickedUpAt?: string | null; deliveryCode?: string | null; destinationLatitude?: number | null; destinationLongitude?: number | null; dispatchMode?: 'own_fleet' | 'external' | 'manual'; externalCourierName?: string | null; courier?: { name: string; vehicleType: string; currentLatitude?: number | null; currentLongitude?: number | null; locationUpdatedAt?: string | null } | null } | null
   tenant: { name: string; phone?: string | null; slug: string; logoData?: string | null; storefrontTheme?: Theme | null }
   orderItems: Array<{ quantity: number; unitPrice: number | string; subtotal: number | string; observations?: string | null; selectedProteinName?: string | null; addons?: unknown; product: { name: string; imageUrl?: string | null } }>
 }
@@ -62,6 +64,13 @@ export default function OrderTrackingPage() {
             <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-widest text-white/65">Pedido</p><h2 className="mt-1 text-3xl font-black">#{order.orderNumber}</h2><p className="mt-2 flex items-center gap-2 text-sm text-white/75"><Clock3 className="h-4 w-4" /> Feito às {new Date(order.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</p></div><span className="rounded-full px-4 py-2 text-xs font-extrabold" style={{ backgroundColor: theme.accentColor, color: theme.primaryColor }}>{cancelled ? 'Cancelado' : steps[Math.max(0, currentIndex)]?.label}</span></div>
           </div>
 
+          {order.status === 'dispatched' && order.delivery?.estimatedArrivalAt && (
+            <div className="border-b border-black/10 bg-white p-5 sm:p-6">
+              <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-widest opacity-50">Previsão atualizada</p><p className="mt-1 text-2xl font-black" style={{ color: theme.primaryColor }}>Chegada por volta de {new Date(order.delivery.estimatedArrivalAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</p><p className="mt-1 text-sm opacity-60">O horário muda automaticamente conforme o entregador avança.</p></div><Truck className="h-9 w-9" style={{ color: theme.accentColor }} /></div>
+              {order.delivery.courier?.currentLatitude != null && order.delivery.courier.currentLongitude != null && order.delivery.destinationLatitude != null && order.delivery.destinationLongitude != null && <div className="mt-4 overflow-hidden rounded-2xl border border-black/10"><DeliveryMap current={{ latitude: order.delivery.courier.currentLatitude, longitude: order.delivery.courier.currentLongitude, label: 'Entregador' }} stops={[{ latitude: order.delivery.destinationLatitude, longitude: order.delivery.destinationLongitude, label: 'Sua entrega' }]} className="h-[280px]" /></div>}
+            </div>
+          )}
+
           <div className="grid gap-8 p-6 sm:p-8 lg:grid-cols-[1fr_280px]">
             <div>
               <h3 className="text-lg font-extrabold">Andamento</h3>
@@ -75,6 +84,7 @@ export default function OrderTrackingPage() {
               <div className="mt-4 space-y-1 border-t border-black/10 pt-4 text-sm"><div className="flex justify-between"><span>Subtotal</span><span>{money.format(Number(order.subtotal))}</span></div><div className="flex justify-between"><span>Entrega</span><span>{money.format(Number(order.deliveryFee))}</span></div><div className="flex justify-between pt-2 text-lg"><strong>Total</strong><strong>{money.format(Number(order.totalAmount))}</strong></div></div>
               <div className="mt-4 rounded-xl bg-white p-3 text-xs"><p className="font-bold">Pagamento: {paymentLabels[order.paymentMethod] ?? order.paymentMethod}</p><p className="mt-1 opacity-60">{order.paymentStatus === 'paid' ? 'Pagamento confirmado' : 'Aguardando confirmação da loja'}</p></div>
               {order.deliveryAddress && <div className="mt-3 text-xs"><p className="font-bold">Entregar em</p><p className="mt-1 opacity-60">{order.deliveryAddress}</p></div>}
+              {order.delivery && (order.delivery.courier || order.delivery.externalCourierName || order.delivery.deliveryCode) && <div className="mt-3 rounded-xl border border-black/10 bg-white p-3 text-xs">{order.delivery.courier ? <><p className="font-bold">Entregador: {order.delivery.courier.name}</p><p className="mt-1 opacity-60">Veículo: {order.delivery.courier.vehicleType}</p></> : order.delivery.externalCourierName ? <><p className="font-bold">Entrega por parceiro</p><p className="mt-1 opacity-60">{order.delivery.externalCourierName}</p></> : <><p className="font-bold">Entrega organizada pela loja</p><p className="mt-1 opacity-60">Não é necessário cadastrar um entregador.</p></>}{order.delivery.deliveryCode && <div className="mt-3 rounded-lg p-3 text-center" style={{ backgroundColor: `${theme.accentColor}22` }}><p className="text-[10px] font-bold uppercase tracking-wider opacity-60">Código para confirmar a entrega</p><strong className="mt-1 block font-mono text-2xl tracking-[.3em]" style={{ color: theme.primaryColor }}>{order.delivery.deliveryCode}</strong><p className="mt-1 opacity-55">Informe somente quando receber o pedido.</p></div>}</div>}
             </aside>
           </div>
         </section>

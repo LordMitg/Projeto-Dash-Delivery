@@ -419,7 +419,7 @@ export default function PricingPanel() {
                   { label: 'Tipo', key: 'vehicleType', type: 'text' },
                   { label: 'km/l (consumo)', key: 'kmPerLiter', type: 'number' },
                   { label: 'Combustivel (R$/l)', key: 'fuelCostPerLiter', type: 'number' },
-                  { label: 'Taxa Fixa (R$/corrida)', key: 'deliveryFee', type: 'number' },
+                  { label: 'Taxa Fixa (R$/entrega)', key: 'deliveryFee', type: 'number' },
                   { label: 'Taxa por km extra (R$/km)', key: 'feePerKm', type: 'number' },
                   { label: 'Raio Base (km)', key: 'baseRadiusKm', type: 'number' },
                 ].map(f => (

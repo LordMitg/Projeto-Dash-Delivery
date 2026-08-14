@@ -24,6 +24,7 @@ export interface PrintItem {
   quantity: number
   observations?: string
   selectedProteinName?: string
+  addons?: Array<{ name: string; quantity: number }>
 }
 
 export interface PrintKitchenPayload {
@@ -32,6 +33,9 @@ export interface PrintKitchenPayload {
   items: PrintItem[]
   observations?: string
   createdAt: string
+  station?: string
+  priority?: boolean
+  priorityReason?: string
 }
 
 export interface PrintDeliveryPayload {
@@ -160,6 +164,9 @@ function itemsHtml(items: PrintItem[]): string {
       if (i.selectedProteinName) {
         lines.push(`<div class="item-sub">- ${esc(i.selectedProteinName)}</div>`)
       }
+      if (i.addons?.length) {
+        lines.push(...i.addons.map((addon) => `<div class="item-sub">+ ${addon.quantity}x ${esc(addon.name)}</div>`))
+      }
       if (i.observations) {
         lines.push(`<div class="item-sub bold">OBS: ${esc(i.observations)}</div>`)
       }
@@ -171,8 +178,9 @@ function itemsHtml(items: PrintItem[]): string {
 function kitchenHtml(p: PrintKitchenPayload, width: PaperWidth): string {
   const totalItems = p.items.reduce((acc, i) => acc + i.quantity, 0)
   return `
-    <div class="center big">COZINHA</div>
+    <div class="center big">${esc(p.station?.toUpperCase() || 'COZINHA')}</div>
     <div class="center bold">${esc(ORDER_TYPE_LABELS[p.orderType] ?? p.orderType)}</div>
+    ${p.priority ? `<div class="center big">*** PRIORIDADE ***</div>${p.priorityReason ? `<div class="center bold">${esc(p.priorityReason)}</div>` : ''}` : ''}
     <div class="rule"></div>
     <div class="row"><span class="bold">Pedido</span><span class="bold">#${esc(p.orderNumber)}</span></div>
     <div class="row"><span>Hora</span><span>${esc(dateTime(p.createdAt))}</span></div>
@@ -185,7 +193,7 @@ function kitchenHtml(p: PrintKitchenPayload, width: PaperWidth): string {
         : ''
     }
     <div class="rule"></div>
-    <div class="footer">via cozinha${width === '58mm' ? ' - 58mm' : ''}</div>
+    <div class="footer">via ${esc((p.station || 'cozinha').toLowerCase())}${width === '58mm' ? ' - 58mm' : ''}</div>
   `
 }
 

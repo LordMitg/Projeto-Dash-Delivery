@@ -86,6 +86,12 @@ export interface AuthTenant {
    */
   deliveryFeeBase?: string | number
   deliveryZones?: DeliveryZone[]
+  couponsEnabled?: boolean
+  loyaltyPointsEnabled?: boolean
+  cashbackEnabled?: boolean
+  pointsPerReal?: string | number
+  pointRedemptionValue?: string | number
+  cashbackPercent?: string | number
 }
 
 /** Item do alternador de negocios do cabecalho. */

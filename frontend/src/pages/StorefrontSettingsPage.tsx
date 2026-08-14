@@ -20,6 +20,12 @@ interface StoreSettings {
   slug: string
   logoData?: string | null
   storefrontTheme?: Partial<StorefrontTheme> | null
+  couponsEnabled: boolean
+  loyaltyPointsEnabled: boolean
+  cashbackEnabled: boolean
+  pointsPerReal: number | string
+  pointRedemptionValue: number | string
+  cashbackPercent: number | string
 }
 
 const defaults: StorefrontTheme = {
@@ -48,12 +54,14 @@ export default function StorefrontSettingsPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
+  const [loyalty,setLoyalty]=useState({couponsEnabled:false,loyaltyPointsEnabled:false,cashbackEnabled:false,pointsPerReal:1,pointRedemptionValue:0.01,cashbackPercent:2})
 
   useEffect(() => {
     apiGet<StoreSettings>('/api/store/settings')
       .then((data) => {
         setStore(data)
         setTheme({ ...defaults, ...(data.storefrontTheme ?? {}) })
+        setLoyalty({couponsEnabled:data.couponsEnabled,loyaltyPointsEnabled:data.loyaltyPointsEnabled,cashbackEnabled:data.cashbackEnabled,pointsPerReal:Number(data.pointsPerReal),pointRedemptionValue:Number(data.pointRedemptionValue),cashbackPercent:Number(data.cashbackPercent)})
       })
       .catch((err) => setError(errorMessage(err, 'Não foi possível abrir a loja digital.')))
       .finally(() => setLoading(false))
@@ -63,6 +71,8 @@ export default function StorefrontSettingsPage() {
     setSaved(false)
     setTheme((current) => ({ ...current, [key]: value }))
   }
+
+  async function saveLoyalty(){setSaving(true);setError('');try{await apiPut('/api/store/loyalty',loyalty);setSaved(true)}catch(err){setError(errorMessage(err,'Não foi possível salvar o programa de relacionamento.'))}finally{setSaving(false)}}
 
   async function save(event: React.FormEvent) {
     event.preventDefault()
@@ -126,6 +136,8 @@ export default function StorefrontSettingsPage() {
           </div>
 
           <ImageUploadField value={theme.bannerImageUrl} onChange={(value) => update('bannerImageUrl', value)} label="Imagem do banner principal" />
+
+          <div className="border-t border-line pt-5"><h3 className="font-semibold text-ink">Fidelidade e promoções</h3><p className="mt-1 text-sm text-slate">Recursos opcionais. Ative somente o que fizer sentido para esta loja.</p><div className="mt-4 grid gap-3 sm:grid-cols-3">{([['couponsEnabled','Cupons'],['loyaltyPointsEnabled','Pontos'],['cashbackEnabled','Cashback']] as const).map(([key,label])=><label key={key} className="flex cursor-pointer items-center justify-between rounded-xl border border-line p-3"><span className="font-semibold">{label}</span><input type="checkbox" checked={loyalty[key]} onChange={e=>setLoyalty(v=>({...v,[key]:e.target.checked}))} className="h-5 w-5"/></label>)}</div><div className="mt-4 grid gap-3 sm:grid-cols-3">{loyalty.loyaltyPointsEnabled&&<><label><span>Pontos por R$ 1</span><input type="number" min="0" step="0.1" value={loyalty.pointsPerReal} onChange={e=>setLoyalty(v=>({...v,pointsPerReal:Number(e.target.value)}))}/></label><label><span>Valor de cada ponto</span><input type="number" min="0.0001" step="0.0001" value={loyalty.pointRedemptionValue} onChange={e=>setLoyalty(v=>({...v,pointRedemptionValue:Number(e.target.value)}))}/></label></>}{loyalty.cashbackEnabled&&<label><span>Cashback (%)</span><input type="number" min="0" max="100" step="0.1" value={loyalty.cashbackPercent} onChange={e=>setLoyalty(v=>({...v,cashbackPercent:Number(e.target.value)}))}/></label>}</div><button type="button" onClick={()=>void saveLoyalty()} disabled={saving} className="mt-4 h-10 rounded-lg border border-brand px-4 text-sm font-semibold text-accent">Salvar programa</button></div>
 
           <div className="flex flex-wrap items-center gap-3 border-t border-line pt-4">
             <button type="submit" disabled={saving} className="inline-flex h-11 items-center gap-2 rounded-lg bg-plum px-5 font-semibold text-cream">

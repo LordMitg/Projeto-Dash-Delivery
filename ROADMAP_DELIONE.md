@@ -14,10 +14,10 @@ Este documento compara o estado real do repositório com o escopo funcional do p
 | Cozinha | Parcial | KDS com etapas e tempo de preparo | Estações/setores, expedição, impressão automática e métricas |
 | Cardápio | Parcial avançado | Central, categorias, cadastro/edição, fotos, ficha técnica, custos, margem e adicionais | Variações, publicação nos canais e importação em lote |
 | Loja digital | Parcial avançado | Vitrine responsiva por slug, tema por loja, categorias, produtos, personalização, carrinho, checkout, cadastro global por telefone e acompanhamento seguro | Cupom, pedido no local, gateway online e confirmação do telefone por OTP |
-| Estoque | Parcial avançado | Central visual, KPIs, níveis, reposição, scanner e livro auditável de entradas, saídas, vendas, cancelamentos e notas | Lotes, validade, inventário físico, transferências e integração com compras |
-| Compras | Ausente | Importação de XML e contas a pagar relacionadas | Fornecedores, cotações, pedidos de compra, aprovações e reposição |
-| Clientes | Backend inicial | Busca e cadastro usados pelo PDV, LTV básico | Tela de CRM, endereços, segmentos, fidelidade, cashback e campanhas |
-| Entregas | Inicial | Taxas por bairro, frota e cálculo comparativo de custo | Despacho, entregadores, mapa, QR, rastreamento e prova de entrega |
+| Estoque | Parcial avançado | Central visual, KPIs, níveis, reposição, scanner, lotes, validade, perdas e inventário físico auditável | Transferências entre unidades e consumo automático por lote (FEFO) |
+| Compras | Parcial avançado | Fornecedores, pedidos, aprovação, recebimento, custo médio, estoque e contas a pagar integrados | Cotações concorrentes, recebimento parcial, devolução e anexos |
+| Clientes | Parcial avançado | CRM, perfil, histórico, métricas, segmentos, consentimento, pontos e cashback auditáveis | Múltiplos endereços, regras automáticas, cupons e campanhas |
+| Entregas | Parcial avançado | Expedição, frota, despacho próprio/terceiro/sem cadastro, código e prova de entrega | Área móvel, GPS/mapa real, rota, ETA e comunicação com o cliente |
 | Financeiro | Parcial | Caixa, sangria, suprimento, contas a pagar, DRE e KPIs | Contas a receber, conciliação, previsão, metas, carteira e repasses |
 | Pagamentos | Modelo local | Formas de pagamento e divisão no pedido | Gateway, subcontas, webhooks, split, estorno, disputa e saque |
 | Fiscal | Parcial de entrada | Importação e processamento de NF-e de compra | Emissão NFC-e/NF-e, certificado, obrigações e apuração |
@@ -57,36 +57,71 @@ Estado: fatia principal concluída em 11/08/2026.
 
 ### Etapa 3 — Ciclo operacional do pedido
 
-- Normalizar todos os estados previstos no escopo.
-- Conectar pedido público, PDV, painel, cozinha, expedição e entrega.
-- Estações de produção, SLA, atrasos, impressão e histórico auditável.
-- Testes de transição para impedir saltos ou estados inválidos.
+Estado: fatia principal concluída em 13/08/2026.
+
+- [x] Normalizar o ciclo operacional usado pelo pedido.
+- [x] Conectar pedido público, PDV, painel, cozinha, expedição e entrega.
+- [x] Produção por item, estações, SLA, prioridade, impressão e histórico auditável.
+- [x] Impedir transições inválidas nas rotas do backend.
+- [ ] Agendamento, cancelamento parcial e métricas históricas por estação.
 
 ### Etapa 4 — Estoque, ficha técnica e compras
 
-- Movimentações auditáveis, lotes, validade, perdas e inventário.
-- Conversões de embalagem/unidade e custo médio.
-- Fornecedores, cotações, pedidos de compra e aprovações.
-- Importação fiscal confirmada gerando estoque, custo e financeiro numa transação.
+Estado: quarta fatia funcional concluída em 13/08/2026.
+
+- [x] Fornecedores, pedidos de compra e aprovações.
+- [x] Pedido de compra com vários insumos e conversão individual de unidade.
+- [x] Conversão de unidade por item e atualização do custo médio.
+- [x] Recebimento gerando movimento de estoque e conta a pagar na mesma transação.
+- [x] Recebimentos parciais por item, saldo pendente e histórico auditável de entradas.
+- [x] Compra rápida para mercado/atacado sem fornecedor ou CNPJ obrigatório.
+- [x] Entrada imediata com Pix, cartão, transferência, dinheiro ou pagamento futuro.
+- [x] Integração da compra rápida com estoque, caixa, contas a pagar e foto opcional do cupom.
+- [x] Painel de compras com métricas, fila de aprovação e sugestão de reposição.
+- [x] Lotes com validade, alertas, baixa por perda e rastreabilidade no livro de estoque.
+- [x] Inventário físico com comparação sistema × contagem e ajuste auditável das divergências.
+- [ ] Consumo automático por lote (FEFO), transferências e cotações entre fornecedores.
+- [ ] Unificar a confirmação de XML fiscal ao mesmo motor de recebimento.
 
 ### Etapa 5 — Clientes, fidelidade e marketing
 
-- Perfil completo, múltiplos endereços e histórico.
-- Segmentos, recorrência, ticket, favoritos e risco de abandono.
-- Cupons, cashback, fidelidade e campanhas com consentimento.
+Estado: segunda fatia funcional concluída em 13/08/2026.
+
+- [x] Tela de CRM com pesquisa, indicadores e ficha completa do cliente.
+- [x] Histórico de pedidos, gasto acumulado, ticket médio e última compra.
+- [x] Segmentos automáticos: campeões, fiéis, novos, em risco e inativos.
+- [x] Pontos e cashback com saldo e extrato auditável de ajustes.
+- [x] Consentimento explícito para comunicações promocionais.
+- [x] Cupons com percentual/valor fixo, vigência, pedido mínimo e limites de uso.
+- [x] Mesmo cálculo seguro de cupom e cashback no PDV e cardápio digital.
+- [x] Acúmulo automático de 1 ponto por real e 2% de cashback por compra.
+- [x] Estorno de benefícios e liberação do cupom quando o pedido é cancelado.
+- [ ] Múltiplos endereços, resgate de pontos, campanhas e regras configuráveis por loja.
 
 ### Etapa 6 — Entregas e entregadores
 
-- Despacho para entregador fixo ou avulso.
-- Área móvel do entregador, QR de coleta e mudança de status.
-- Mapa, rota, ETA, rastreamento e prova de entrega.
+Estado: primeira fatia funcional concluída em 13/08/2026.
+
+- [x] Expedição e despacho para frota própria ou entregador externo.
+- [x] Permitir saída e conclusão sem entregador cadastrado.
+- [x] Código de confirmação visível no acompanhamento do cliente e prova de entrega.
+- [x] Disponibilidade da frota e atualização em tempo real.
+- [x] Área móvel do entregador com login restrito e fila própria da loja.
+- [x] QR Code seguro por pedido, leitura de várias paradas e retirada sem marketplace ou oferta de entregas.
+- [x] GPS, mapa real, ordenação automática, rota sequencial, recálculo e ETA para o cliente.
+- [ ] Endurecer o provedor de mapas para produção (instância dedicada/contratada, limites e monitoramento).
 
 ### Etapa 7 — Financeiro, pagamentos e fiscal
 
-- Contas a receber, conciliação e fluxo projetado.
-- Gateway abstrato, subcontas, split, webhooks idempotentes e estornos.
-- Carteira, repasses e saques com trilha de auditoria.
-- Emissão fiscal e obrigações, sempre isoladas por estabelecimento.
+Estado: primeira fatia funcional concluída em 13/08/2026.
+
+- [x] Central financeira com caixa, entradas, saídas, gráfico de 30 dias e resumo por forma de pagamento.
+- [x] Contas a receber avulsas ou parceladas, baixa parcial/total e geração automática para vendas no fiado.
+- [x] Conciliação prevista por canal, exibindo valor bruto, taxas configuradas e líquido esperado.
+- [ ] Fluxo projetado reunindo contas a pagar e a receber futuras em calendário e cenários.
+- [ ] Gateway abstrato, subcontas, split, webhooks idempotentes e estornos.
+- [ ] Carteira, repasses e saques com trilha de auditoria.
+- [ ] Emissão fiscal e obrigações, sempre isoladas por estabelecimento.
 
 ### Etapa 8 — Relatórios e inteligência
 

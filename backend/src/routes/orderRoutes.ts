@@ -15,6 +15,7 @@
  *  8. Nao emitia evento em tempo real para a tela da cozinha.
  */
 import { Router } from 'express'
+import { randomBytes } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/prisma.js'
 import {
@@ -33,6 +34,7 @@ import { applyStockDeduction, restoreStock, type StockConsumption } from '../ser
 import { findOpenRegister, recordSaleInCash } from '../services/cashService.js'
 import { emitToTenant } from '../lib/realtime.js'
 import { env } from '../config/env.js'
+import { applyCustomerRewards, quoteBenefits } from '../services/loyaltyService.js'
 
 const router = Router()
 
@@ -287,6 +289,9 @@ const createOrderSchema = z.object({
   /** Bairro para calcular a taxa de entrega. */
   deliveryZone: z.string().trim().nullish(),
   discount: money.default(0),
+  couponCode: z.string().trim().max(30).nullish(),
+  cashbackToUse: money.default(0),
+  pointsToUse: z.coerce.number().int().min(0).default(0),
   /** Valor em dinheiro entregue pelo cliente (para calcular o troco). */
   changeFor: money.nullish(),
   channelSlug: z.string().trim().nullish(),
@@ -459,13 +464,24 @@ router.post(
         selectedProteinName: proteinName,
         addons: frozenAddons.length > 0 ? (frozenAddons as unknown as Prisma.InputJsonValue) : undefined,
         addonsTotal: dec(addonsTotal),
+        productionStatus: 'pending',
+        preparationStation: product.preparationStation || 'Cozinha',
+        preparationTimeMinutes: product.preparationTimeMinutes || 15,
       })
     }
 
     // ---- 4. Taxa, desconto e total (sempre no servidor) ----------------
     const deliveryFee = resolveDeliveryFee(body.orderType, body.deliveryZone, tenant)
-    const discount = Math.min(body.discount, subtotal)
+    const benefitCustomer = body.customerId
+      ? await prisma.customer.findFirst({ where: { id: body.customerId, tenantId } })
+      : null
+    const loyaltyQuote = await quoteBenefits(prisma, { tenantId, customerId:benefitCustomer?.id, subtotal, couponCode:body.couponCode, cashbackToUse:body.cashbackToUse, pointsToUse:body.pointsToUse })
+    const appliedCoupon = loyaltyQuote.coupon
+    const discount = Math.min(body.discount + loyaltyQuote.discount, subtotal)
     const totalAmount = subtotal + deliveryFee - discount
+    const hasCustomer = Boolean(benefitCustomer || body.newCustomer?.name)
+    const pointsEarned = hasCustomer && loyaltyQuote.config.loyaltyPointsEnabled ? Math.floor(totalAmount * loyaltyQuote.config.pointsPerReal) : 0
+    const cashbackEarned = hasCustomer && loyaltyQuote.config.cashbackEnabled ? round2(totalAmount * loyaltyQuote.config.cashbackPercent / 100) : 0
 
     if (totalAmount < 0) throw badRequest('O desconto nao pode ser maior que o total do pedido')
 
@@ -615,20 +631,34 @@ router.post(
       )
 
       // 7c. Pedido
+      const deliveryCustomer = body.orderType === 'delivery' && customerId
+        ? await tx.customer.findFirst({ where: { id: customerId, tenantId } })
+        : null
       const createdOrder = await tx.order.create({
         data: {
           orderNumber: await nextOrderNumber(tx, tenantId),
+          publicToken: body.orderType === 'delivery' ? randomBytes(24).toString('hex') : null,
           status: 'pending',
           orderType: body.orderType,
           subtotal: dec(subtotal),
           deliveryFee: dec(deliveryFee),
           discount: dec(discount),
+          couponCode: appliedCoupon?.coupon.code ?? null,
+          cashbackUsed: dec(body.cashbackToUse),
+          pointsUsed: body.pointsToUse,
+          pointsEarned,
+          cashbackEarned: dec(cashbackEarned),
           totalAmount: dec(totalAmount),
           changeFor: changeFor != null ? dec(changeFor) : null,
           changeAmount: changeAmount != null ? dec(changeAmount) : null,
           paymentMethod: primaryMethod,
           paymentStatus: hasFiado ? 'pending' : 'paid',
           observations: body.observations ?? null,
+          deliveryAddress: deliveryCustomer
+            ? [deliveryCustomer.address, deliveryCustomer.neighborhood, deliveryCustomer.city, deliveryCustomer.state]
+                .filter(Boolean)
+                .join(' · ')
+            : null,
           tenantId,
           createdById: auth.userId,
           customerId,
@@ -636,6 +666,9 @@ router.post(
           cashRegisterId: openRegister.id,
           orderItems: { create: orderItemsData },
           payments: { create: paymentsData },
+          ...(body.orderType === 'delivery' && {
+            delivery: { create: { tenantId, status: 'pending' } },
+          }),
         },
         include: {
           orderItems: { include: { product: { select: { id: true, name: true } } } },
@@ -654,6 +687,14 @@ router.post(
         userId: auth.userId,
         payments: rawPayments.map((p) => ({ method: p.method, amount: p.amount })),
       })
+
+      // Fiado vira uma conta a receber vinculada ao pedido. Nao e entrada de
+      // caixa ate o cliente realmente pagar.
+      if (hasFiado) {
+        const fiadoAmount = rawPayments.filter((p) => p.method === 'fiado').reduce((sum,p)=>sum+p.amount,0)
+        const dueDate = new Date(); dueDate.setDate(dueDate.getDate()+30); dueDate.setHours(12,0,0,0)
+        await tx.accountReceivable.create({ data: { tenantId, customerId, orderId:createdOrder.id, description:`Pedido #${createdOrder.orderNumber}`, amount:dec(fiadoAmount), dueDate } })
+      }
 
       // 7c-ter. Primeira linha do historico: o pedido entrou.
       // O canal vai na `note` porque e o que o feed mostra ao lado do nome
@@ -679,6 +720,12 @@ router.post(
             lastOrderAt: new Date(),
           },
         })
+        await applyCustomerRewards(tx, { tenantId, customerId, orderId: createdOrder.id, total: totalAmount, cashbackUsed: body.cashbackToUse, pointsUsed:body.pointsToUse, actorId: auth.userId })
+      }
+
+      if (appliedCoupon) {
+        await tx.coupon.update({ where: { id: appliedCoupon.coupon.id }, data: { usageCount: { increment: 1 } } })
+        await tx.couponRedemption.create({ data: { amount: dec(appliedCoupon.amount), tenantId, couponId: appliedCoupon.coupon.id, customerId, orderId: createdOrder.id } })
       }
 
       return createdOrder
@@ -726,12 +773,24 @@ router.patch(
 
     const order = await prisma.order.findFirst({
       where: { id, tenantId },
-      include: { orderItems: { include: { product: { include: { technicalSheet: true } } } } },
+      include: {
+        delivery: true,
+        orderItems: { include: { product: { include: { technicalSheet: true } } } },
+      },
     })
     if (!order) throw notFound('Pedido nao encontrado')
 
     const current = order.status as OrderStatus
     if (current === status) return ok(res, { id, status })
+
+    // Delivery tem uma etapa operacional propria. Mover direto pelo Kanban
+    // deixaria o pedido "em rota" sem entregador e sem horario de retirada.
+    if (order.orderType === 'delivery' && ['dispatched', 'delivered'].includes(status)) {
+      throw conflict(
+        'Use a central de Entregas para confirmar a saida ou o recebimento.',
+        'USE_DELIVERY_DISPATCH',
+      )
+    }
 
     if (!ALLOWED_TRANSITIONS[current]?.includes(status)) {
       throw conflict(
@@ -797,11 +856,32 @@ router.patch(
 
         // Desfaz o LTV do cliente.
         if (order.customerId) {
-          await tx.customer.update({
-            where: { id: order.customerId },
+          const customer = await tx.customer.findUnique({ where: { id: order.customerId } })
+          if (customer) {
+            const nextPoints = Math.max(0, customer.loyaltyPoints - order.pointsEarned + order.pointsUsed)
+            const pointsDelta = nextPoints - customer.loyaltyPoints
+            const cashbackDelta = Number(order.cashbackUsed) - Number(order.cashbackEarned)
+            const nextCashback = Math.max(0, Number(customer.cashbackBalance) + cashbackDelta)
+            await tx.customer.update({ where: { id: order.customerId }, data: { ltv: { decrement: Number(order.totalAmount) }, totalOrders: { decrement: 1 }, loyaltyPoints: { increment: pointsDelta }, cashbackBalance: dec(nextCashback) } })
+            if (pointsDelta !== 0 || cashbackDelta !== 0) await tx.loyaltyTransaction.create({ data: { pointsDelta, cashbackDelta: dec(cashbackDelta), pointsBalance: customer.loyaltyPoints + pointsDelta, cashbackBalance: dec(nextCashback), reason: 'Estorno de beneficios por cancelamento', sourceType: 'refund', sourceId: order.id, tenantId, customerId: order.customerId, actorId: auth.userId } })
+          }
+        }
+
+        const redemption = await tx.couponRedemption.findUnique({ where: { orderId: order.id } })
+        if (redemption) { await tx.couponRedemption.delete({ where: { id: redemption.id } }); await tx.coupon.update({ where: { id: redemption.couponId }, data: { usageCount: { decrement: 1 } } }) }
+
+        if (order.delivery) {
+          if (order.delivery.courierId) {
+            await tx.fleet.updateMany({
+              where: { id: order.delivery.courierId, tenantId },
+              data: { availability: 'available' },
+            })
+          }
+          await tx.delivery.update({
+            where: { id: order.delivery.id },
             data: {
-              ltv: { decrement: Number(order.totalAmount) },
-              totalOrders: { decrement: 1 },
+              status: 'failed',
+              proofNotes: reason ? `Pedido cancelado: ${reason}` : 'Pedido cancelado.',
             },
           })
         }
@@ -825,6 +905,20 @@ router.patch(
           note: reason ?? null,
         },
       })
+
+      // Mantem o painel de pedidos compativel com o KDS por item. Se o gerente
+      // mover o pedido inteiro, os itens acompanham a etapa da cozinha.
+      if (status === 'preparing') {
+        await tx.orderItem.updateMany({
+          where: { orderId: order.id, productionStatus: 'pending' },
+          data: { productionStatus: 'preparing', startedAt: new Date() },
+        })
+      } else if (status === 'ready') {
+        await tx.orderItem.updateMany({
+          where: { orderId: order.id, productionStatus: { not: 'ready' } },
+          data: { productionStatus: 'ready', readyAt: new Date() },
+        })
+      }
 
       return tx.order.update({
         where: { id },

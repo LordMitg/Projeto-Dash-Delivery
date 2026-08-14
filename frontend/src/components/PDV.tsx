@@ -96,6 +96,11 @@ export function PDV({ onOpenMenu }: PDVProps) {
   const [cart, setCart] = useState<CartItem[]>([])
   const [orderType, setOrderType] = useState<OrderType>('balcao')
   const [discount, setDiscount] = useState(0)
+  const [couponCode, setCouponCode] = useState('')
+  const [cashbackToUse, setCashbackToUse] = useState(0)
+  const [pointsToUse, setPointsToUse] = useState(0)
+  const [benefitDiscount, setBenefitDiscount] = useState(0)
+  const [applyingBenefits, setApplyingBenefits] = useState(false)
   const [orderNotes, setOrderNotes] = useState('')
 
   // ── Cliente e entrega ─────────────────────────────────────────────────────
@@ -227,7 +232,16 @@ export function PDV({ onOpenMenu }: PDVProps) {
         ? Number(selectedZone.fee) || 0
         : Number(activeTenant?.deliveryFeeBase ?? 0) || 0
 
-  const total = round2(Math.max(0, subtotal + deliveryFee - discount))
+  const total = round2(Math.max(0, subtotal + deliveryFee - discount - benefitDiscount))
+
+  async function applyBenefits() {
+    setApplyingBenefits(true); setSubmitError(null)
+    try {
+      const quote = await apiPost<{ discount: number; couponCode: string | null }>('/api/customers/benefits/quote', { customerId: customer?.id ?? null, subtotal, couponCode: couponCode.trim() || null, cashbackToUse, pointsToUse })
+      setBenefitDiscount(Number(quote.discount)); if (quote.couponCode) setCouponCode(quote.couponCode)
+    } catch (err) { setBenefitDiscount(0); setSubmitError(errorMessage(err, 'Não foi possível aplicar o benefício.')) }
+    finally { setApplyingBenefits(false) }
+  }
 
   // ── Manipular a comanda ───────────────────────────────────────────────────
 
@@ -307,6 +321,7 @@ export function PDV({ onOpenMenu }: PDVProps) {
   const resetSale = useCallback(() => {
     setCart([])
     setDiscount(0)
+    setCouponCode(''); setCashbackToUse(0); setPointsToUse(0); setBenefitDiscount(0)
     setOrderNotes('')
     setPhone('')
     setCustomer(null)
@@ -341,6 +356,9 @@ export function PDV({ onOpenMenu }: PDVProps) {
         changeFor: s.method === 'cash' && s.changeFor != null ? round2(s.changeFor) : null,
       })),
       discount,
+      couponCode: couponCode.trim() || null,
+      cashbackToUse,
+      pointsToUse,
       deliveryZone: orderType === 'delivery' ? deliveryZone.trim() || null : null,
       observations: orderNotes.trim() || null,
     }
@@ -643,6 +661,18 @@ export function PDV({ onOpenMenu }: PDVProps) {
             notes={orderNotes}
             onNotesChange={setOrderNotes}
             onDiscountChange={setDiscount}
+            couponCode={couponCode}
+            onCouponCodeChange={(value) => { setCouponCode(value); setBenefitDiscount(0) }}
+            cashbackToUse={cashbackToUse}
+            onCashbackToUseChange={(value) => { setCashbackToUse(value); setBenefitDiscount(0) }}
+            pointsToUse={pointsToUse}
+            onPointsToUseChange={(value) => { setPointsToUse(value); setBenefitDiscount(0) }}
+            couponsEnabled={Boolean(activeTenant?.couponsEnabled)}
+            cashbackEnabled={Boolean(activeTenant?.cashbackEnabled)}
+            loyaltyPointsEnabled={Boolean(activeTenant?.loyaltyPointsEnabled)}
+            benefitDiscount={benefitDiscount}
+            onApplyBenefits={() => void applyBenefits()}
+            applyingBenefits={applyingBenefits}
             method={payMethod}
             onMethodChange={setPayMethod}
             onChangeQuantity={changeQuantity}

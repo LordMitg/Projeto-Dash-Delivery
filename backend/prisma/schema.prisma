@@ -12,30 +12,30 @@ datasource db {
 
 // ========== TENANT MODEL ==========
 model Tenant {
-  id              String   @id @default(cuid())
+  id       String  @id @default(cuid())
   // Nome da loja. NAO e unico: dois donos diferentes podem ter cada um a sua
   // "Pizzaria do Joao". A identidade tecnica fica no `slug`, esse sim unico.
-  name            String
-  slug            String   @unique // URL-friendly identifier
+  name     String
+  slug     String  @unique // URL-friendly identifier
   // Logo da loja como data URL (~200KB), redimensionada no navegador antes do
   // envio. Sem storage externo: cada loja tem a sua e o volume e minimo.
-  logoData        String?
-  email           String
-  phone           String?
-  address         String?
-  city            String?
-  state           String?
-  zipCode         String?
-  active          Boolean  @default(true)
+  logoData String?
+  email    String
+  phone    String?
+  address  String?
+  city     String?
+  state    String?
+  zipCode  String?
+  active   Boolean @default(true)
 
   // ---- Operação da loja (requisito 7) ----
   // Chave geral: quando false, o PDV bloqueia novas vendas.
-  isOpen          Boolean  @default(false)
+  isOpen          Boolean @default(false)
   // Horários por dia da semana, no formato:
   // { "mon": [{ "from": "18:00", "to": "23:30" }], "tue": [...], ... }
   openingHours    Json?
   // Taxa de entrega padrão, usada quando o bairro não tem taxa própria.
-  deliveryFeeBase Decimal  @db.Decimal(10, 2) @default(0)
+  deliveryFeeBase Decimal @default(0) @db.Decimal(10, 2)
   // Taxas por bairro: [{ "name": "Centro", "fee": 5.00 }, ...]
   deliveryZones   Json?
   // Preferências de impressão da comanda (largura da bobina, vias automáticas).
@@ -44,49 +44,70 @@ model Tenant {
   // campos de tema sem migracao a cada ajuste visual.
   storefrontTheme Json?
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  
+  // Programa de relacionamento totalmente opcional por loja. Nenhum saldo e
+  // gerado ou oferecido no checkout enquanto a respectiva chave estiver falsa.
+  couponsEnabled       Boolean @default(false)
+  loyaltyPointsEnabled Boolean @default(false)
+  cashbackEnabled      Boolean @default(false)
+  pointsPerReal        Decimal @default(1) @db.Decimal(10, 2)
+  pointRedemptionValue Decimal @default(0.01) @db.Decimal(10, 4)
+  cashbackPercent      Decimal @default(2) @db.Decimal(5, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   // Relações
   // A equipe do negocio e alcancada por `memberships` (antes era `users`, que
   // dependia do vinculo 1:1 removido).
-  memberships        Membership[]
-  orders             Order[]
-  products           Product[]
-  deliveries         Delivery[]
-  customers          Customer[]
-  ingredients        Ingredient[]
-  productIngredients ProductIngredient[]
-  cashRegisters      CashRegister[]
-  accountsPayable    AccountPayable[]
-  dreCategories      DreCategory[]
-  invoices           Invoice[]
-  salesChannels      SalesChannel[]
-  pricingRules       PricingRule[]
-  fleet              Fleet[]
-  deliveryQuotes     DeliveryQuote[]
-  menuCategories     MenuCategory[]
-  productAddons      ProductAddon[]
-  orderEvents        OrderEvent[]
-  stockMovements     StockMovement[]
+  memberships         Membership[]
+  orders              Order[]
+  products            Product[]
+  deliveries          Delivery[]
+  customers           Customer[]
+  ingredients         Ingredient[]
+  productIngredients  ProductIngredient[]
+  cashRegisters       CashRegister[]
+  accountsPayable     AccountPayable[]
+  accountsReceivable  AccountReceivable[]
+  dreCategories       DreCategory[]
+  invoices            Invoice[]
+  salesChannels       SalesChannel[]
+  pricingRules        PricingRule[]
+  fleet               Fleet[]
+  deliveryQuotes      DeliveryQuote[]
+  menuCategories      MenuCategory[]
+  productAddons       ProductAddon[]
+  orderEvents         OrderEvent[]
+  stockMovements      StockMovement[]
+  suppliers           Supplier[]
+  purchaseOrders      PurchaseOrder[]
+  purchaseReceipts    PurchaseReceipt[]
+  stockLots           StockLot[]
+  inventoryCounts     InventoryCount[]
+  inventoryItems      InventoryCountItem[]
+  loyaltyTransactions LoyaltyTransaction[]
+  coupons             Coupon[]
+  couponRedemptions   CouponRedemption[]
+  customerAddresses   CustomerAddress[]
 
   @@map("tenants")
 }
 
 // ========== USER MODEL ==========
 model User {
-  id              String   @id @default(cuid())
+  id        String   @id @default(cuid())
   // Unico GLOBAL. Antes era unico por loja (`@@unique([email, tenantId])`), o
   // que obrigava uma linha `User` por loja e impedia a mesma conta de ter mais
   // de um negocio — era o bloqueio central do multi-negocio.
-  email           String   @unique
-  password        String   // Hash bcrypt
-  firstName       String
-  lastName        String
-  role            String   @default("staff") // admin, manager, staff, delivery
-  active          Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  email     String   @unique
+  password  String // Hash bcrypt
+  firstName String
+  lastName  String
+  phone     String?
+  role      String   @default("staff") // admin, manager, staff, delivery
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // ---- Recuperação de senha por perguntas de segurança ----
   // Guardamos a CHAVE da pergunta (ex.: "birthCity"), nao o enunciado: o texto
@@ -104,16 +125,24 @@ model User {
 
   // Multi-Tenant: o vinculo com as lojas vive em `Membership`, permitindo que a
   // mesma conta tenha varios negocios com permissao diferente em cada um.
-  memberships     Membership[]
+  memberships Membership[]
 
   // Relações
-  orders            Order[]
-  deliveries        Delivery[]
-  cashRegistersOpened CashRegister[] @relation("CashOpenedBy")
-  cashRegistersClosed CashRegister[] @relation("CashClosedBy")
-  cashEntries       CashEntry[]
-  orderEvents       OrderEvent[]
-  stockMovements    StockMovement[]
+  orders                 Order[]
+  deliveries             Delivery[]
+  driverDeliveries       Delivery[]           @relation("DeliveryDriver")
+  fleetProfiles          Fleet[]              @relation("FleetDriverAccount")
+  cashRegistersOpened    CashRegister[]       @relation("CashOpenedBy")
+  cashRegistersClosed    CashRegister[]       @relation("CashClosedBy")
+  cashEntries            CashEntry[]
+  orderEvents            OrderEvent[]
+  stockMovements         StockMovement[]
+  purchaseOrdersCreated  PurchaseOrder[]      @relation("PurchaseOrderCreatedBy")
+  purchaseOrdersApproved PurchaseOrder[]      @relation("PurchaseOrderApprovedBy")
+  purchaseOrdersReceived PurchaseOrder[]      @relation("PurchaseOrderReceivedBy")
+  purchaseReceipts       PurchaseReceipt[]
+  loyaltyTransactions    LoyaltyTransaction[]
+  couponRedemptions      CouponRedemption[]
 
   @@map("users")
 }
@@ -145,35 +174,140 @@ model Membership {
 
 // ========== CUSTOMER MODEL ==========
 model Customer {
-  id              String   @id @default(cuid())
-  name            String
-  email           String?
-  phone           String
-  address         String?
+  id               String    @id @default(cuid())
+  name             String
+  email            String?
+  phone            String
+  address          String?
   // Bairro: cruzado com `Tenant.deliveryZones` para achar a taxa de entrega.
   // `POST /api/orders` ja aceitava `newCustomer.neighborhood`, mas nao havia
   // coluna — o bairro era silenciosamente descartado, e o cliente recorrente
   // precisava reinformar o bairro (e a taxa) em cada pedido.
-  neighborhood    String?
-  city            String?
-  state           String?
-  zipCode         String?
-  notes           String?
-  ltv             Decimal  @db.Decimal(10, 2) @default(0) // Lifetime Value acumulado
-  totalOrders     Int      @default(0)                    // Contagem de pedidos
-  lastOrderAt     DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  neighborhood     String?
+  city             String?
+  state            String?
+  zipCode          String?
+  notes            String?
+  birthday         DateTime?
+  marketingConsent Boolean   @default(false)
+  loyaltyPoints    Int       @default(0)
+  cashbackBalance  Decimal   @default(0) @db.Decimal(10, 2)
+  ltv              Decimal   @default(0) @db.Decimal(10, 2) // Lifetime Value acumulado
+  totalOrders      Int       @default(0) // Contagem de pedidos
+  lastOrderAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   // Multi-Tenant
-  tenantId        String
-  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   // Relações
-  orders          Order[]
+  orders              Order[]
+  loyaltyTransactions LoyaltyTransaction[]
+  couponRedemptions   CouponRedemption[]
+  addresses           CustomerAddress[]
+  accountsReceivable  AccountReceivable[]
 
   @@index([tenantId])
   @@map("customers")
+}
+
+model CustomerAddress {
+  id           String   @id @default(cuid())
+  label        String   @default("Principal")
+  address      String
+  neighborhood String
+  city         String?
+  state        String?
+  zipCode      String?
+  isDefault    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, customerId])
+  @@map("customer_addresses")
+}
+
+// Extrato imutavel dos beneficios do cliente. Pontos e cashback ficam também
+// no Customer para leitura rapida, enquanto esta tabela explica cada ajuste.
+model LoyaltyTransaction {
+  id              String   @id @default(cuid())
+  pointsDelta     Int      @default(0)
+  cashbackDelta   Decimal  @default(0) @db.Decimal(10, 2)
+  pointsBalance   Int
+  cashbackBalance Decimal  @db.Decimal(10, 2)
+  reason          String
+  sourceType      String? // manual | order | redemption
+  sourceId        String?
+  createdAt       DateTime @default(now())
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  actorId String?
+  actor   User?   @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([customerId, createdAt])
+  @@map("loyalty_transactions")
+}
+
+// Cupons pertencem a uma loja. O servidor sempre recalcula o desconto e
+// controla vigencia/limites; o navegador envia apenas o codigo desejado.
+model Coupon {
+  id                    String    @id @default(cuid())
+  code                  String
+  description           String?
+  discountType          String // percentage | fixed
+  discountValue         Decimal   @db.Decimal(10, 2)
+  minimumOrder          Decimal   @default(0) @db.Decimal(10, 2)
+  maximumDiscount       Decimal?  @db.Decimal(10, 2)
+  startsAt              DateTime  @default(now())
+  endsAt                DateTime?
+  usageLimit            Int?
+  usageLimitPerCustomer Int       @default(1)
+  usageCount            Int       @default(0)
+  active                Boolean   @default(true)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  tenantId    String
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  redemptions CouponRedemption[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, active, startsAt, endsAt])
+  @@map("coupons")
+}
+
+model CouponRedemption {
+  id        String   @id @default(cuid())
+  amount    Decimal  @db.Decimal(10, 2)
+  createdAt DateTime @default(now())
+
+  tenantId   String
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  couponId   String
+  coupon     Coupon    @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  orderId    String    @unique
+  order      Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user       User?     @relation(fields: [userId], references: [id])
+  userId     String?
+
+  @@index([couponId, customerId])
+  @@index([tenantId, createdAt])
+  @@map("coupon_redemptions")
 }
 
 // Cadastro simples do consumidor, compartilhado entre as lojas da plataforma.
@@ -191,53 +325,79 @@ model ConsumerProfile {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  addresses ConsumerAddress[]
+
   @@map("consumer_profiles")
+}
+
+model ConsumerAddress {
+  id           String   @id @default(cuid())
+  label        String   @default("Principal")
+  address      String
+  neighborhood String
+  city         String?
+  state        String?
+  zipCode      String?
+  isDefault    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  consumerProfileId String
+  consumerProfile   ConsumerProfile @relation(fields: [consumerProfileId], references: [id], onDelete: Cascade)
+
+  @@index([consumerProfileId])
+  @@map("consumer_addresses")
 }
 
 // ========== PRODUCT MODEL ==========
 model Product {
-  id              String   @id @default(cuid())
-  name            String
-  description     String?
-  sku             String
-  price           Decimal  @db.Decimal(10, 2)     // Preço de venda
-  costPrice       Decimal  @db.Decimal(10, 2) @default(0) // CMV calculado
-  laborCost       Decimal  @db.Decimal(10, 2) @default(0) // Mão de obra fixa por unidade
-  category        String?                        // legado: categoria como texto livre
-  productType     String   @default("simple")     // simple | combo
-  active          Boolean  @default(true)
-  stock           Int      @default(0)
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+  sku         String
+  price       Decimal @db.Decimal(10, 2) // Preço de venda
+  costPrice   Decimal @default(0) @db.Decimal(10, 2) // CMV calculado
+  laborCost   Decimal @default(0) @db.Decimal(10, 2) // Mão de obra fixa por unidade
+  category    String? // legado: categoria como texto livre
+  productType String  @default("simple") // simple | combo
+  active      Boolean @default(true)
+  stock       Int     @default(0)
 
   // ---- Cardápio e scanner (requisitos 3 e 4) ----
   // Código de barras/EAN lido pela câmera do celular.
-  barcode         String?
+  barcode                String?
   // Imagem do produto exibida no cardápio e no PDV.
-  imageUrl        String?
+  imageUrl               String?
   // Ordem de exibição dentro da categoria.
-  sortOrder       Int      @default(0)
+  sortOrder              Int      @default(0)
   // Marca o produto como destaque no cardápio.
-  featured        Boolean  @default(false)
+  featured               Boolean  @default(false)
+  // Setor que prepara o item no KDS. Texto livre para atender cozinhas
+  // diferentes (grelha, bar, confeitaria, montagem...).
+  preparationStation     String   @default("Cozinha")
+  // SLA esperado para uma unidade deste produto ficar pronta.
+  preparationTimeMinutes Int      @default(15)
   // Regra de combo: opções visuais que o cliente vê (ex: 3 proteínas)
   // Formato: [{ group: "proteina", label: "Frango", ingredientId: "xxx" }, ...]
-  comboOptions    Json?
+  comboOptions           Json?
   // Embalagem padrão associada (ingredientId da embalagem "divisória")
-  packagingIngredientId String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  packagingIngredientId  String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 
   // Multi-Tenant
-  tenantId        String
-  tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   // Categoria estruturada do cardápio
-  menuCategoryId  String?
-  menuCategory    MenuCategory?       @relation(fields: [menuCategoryId], references: [id], onDelete: SetNull)
+  menuCategoryId String?
+  menuCategory   MenuCategory? @relation(fields: [menuCategoryId], references: [id], onDelete: SetNull)
 
   // Relações
-  orderItems      OrderItem[]
-  technicalSheet  ProductIngredient[]
-  pricingRules    PricingRule[]
-  addons          ProductAddon[]
+  orderItems     OrderItem[]
+  technicalSheet ProductIngredient[]
+  pricingRules   PricingRule[]
+  addons         ProductAddon[]
 
   @@unique([sku, tenantId])
   @@unique([barcode, tenantId])
@@ -250,22 +410,22 @@ model Product {
 // ========== MENU CATEGORY (CATEGORIAS DO CARDÁPIO) ==========
 // Agrupa os produtos no cardápio e no PDV (ex: Combos, Bebidas, Sobremesas).
 model MenuCategory {
-  id              String   @id @default(cuid())
-  name            String
-  slug            String
-  description     String?
-  imageUrl        String?
-  sortOrder       Int      @default(0)
-  active          Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id          String   @id @default(cuid())
+  name        String
+  slug        String
+  description String?
+  imageUrl    String?
+  sortOrder   Int      @default(0)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   // Multi-Tenant
-  tenantId        String
-  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   // Relações
-  products        Product[]
+  products Product[]
 
   @@unique([slug, tenantId])
   @@index([tenantId])
@@ -276,31 +436,31 @@ model MenuCategory {
 // Itens cobrados à parte, escolhidos no momento da venda (requisito 3).
 // Ex: "Bacon extra +R$4,00", "Refrigerante 350ml +R$6,00".
 model ProductAddon {
-  id              String   @id @default(cuid())
-  name            String
-  price           Decimal  @db.Decimal(10, 2) @default(0)
+  id            String   @id @default(cuid())
+  name          String
+  price         Decimal  @default(0) @db.Decimal(10, 2)
   // Agrupa opções na tela do PDV (ex: "Adicionais", "Bebida").
-  groupName       String   @default("Adicionais")
+  groupName     String   @default("Adicionais")
   // Se true, o operador é obrigado a escolher uma opção do grupo.
-  required        Boolean  @default(false)
+  required      Boolean  @default(false)
   // Máximo de unidades deste adicional por item do pedido.
-  maxQuantity     Int      @default(1)
+  maxQuantity   Int      @default(1)
   // Insumo consumido do estoque quando este adicional é vendido.
-  ingredientId    String?
+  ingredientId  String?
   // Quantidade do insumo consumida por unidade do adicional.
-  ingredientQty   Decimal? @db.Decimal(10, 4)
-  sortOrder       Int      @default(0)
-  active          Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  ingredientQty Decimal? @db.Decimal(10, 4)
+  sortOrder     Int      @default(0)
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   // Multi-Tenant
-  tenantId        String
-  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   // Relações
-  productId       String
-  product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
   @@index([productId])
@@ -310,24 +470,24 @@ model ProductAddon {
 // ========== PRODUCT INGREDIENT (Ficha Técnica) ==========
 // Tabela de junção com quantidade, custo calculado e flag de proteína principal
 model ProductIngredient {
-  id              String     @id @default(cuid())
-  quantity        Decimal    @db.Decimal(10, 4)   // Quantidade usada na receita
-  unitCost        Decimal    @db.Decimal(10, 4)   // Custo unitário no momento do cadastro
-  totalCost       Decimal    @db.Decimal(10, 4)   // quantity × unitCost × (1 + breakageFactor/100)
-  isMainProtein   Boolean    @default(false)       // Marca a proteína principal do combo
-  isPackaging     Boolean    @default(false)       // Marca ingrediente como embalagem
-  notes           String?
+  id            String  @id @default(cuid())
+  quantity      Decimal @db.Decimal(10, 4) // Quantidade usada na receita
+  unitCost      Decimal @db.Decimal(10, 4) // Custo unitário no momento do cadastro
+  totalCost     Decimal @db.Decimal(10, 4) // quantity × unitCost × (1 + breakageFactor/100)
+  isMainProtein Boolean @default(false) // Marca a proteína principal do combo
+  isPackaging   Boolean @default(false) // Marca ingrediente como embalagem
+  notes         String?
 
   // Multi-Tenant (herdado do produto — facilita queries de relatório)
-  tenantId        String
-  tenant          Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   // Relações
-  productId       String
-  product         Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
-  ingredientId    String
-  ingredient      Ingredient @relation(fields: [ingredientId], references: [id])
+  ingredientId String
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id])
 
   @@unique([productId, ingredientId])
   @@index([tenantId])
@@ -338,34 +498,43 @@ model ProductIngredient {
 
 // ========== ORDER MODEL ==========
 model Order {
-  id              String   @id @default(cuid())
-  orderNumber     String
-  status          String   @default("pending") // pending, confirmed, preparing, ready, dispatched, delivered, cancelled
-  orderType       String   @default("delivery") // delivery | balcao | mesa
+  id          String @id @default(cuid())
+  orderNumber String
+  status      String @default("pending") // pending, confirmed, preparing, ready, dispatched, delivered, cancelled
+  orderType   String @default("delivery") // delivery | balcao | mesa
 
   // ---- Composição do valor (requisito 1) ----
   // Soma dos itens + adicionais, antes de taxa e desconto.
-  subtotal        Decimal  @db.Decimal(10, 2) @default(0)
+  subtotal       Decimal  @default(0) @db.Decimal(10, 2)
   // Taxa de entrega cobrada do cliente.
-  deliveryFee     Decimal  @db.Decimal(10, 2) @default(0)
+  deliveryFee    Decimal  @default(0) @db.Decimal(10, 2)
   // subtotal + deliveryFee - discount
-  totalAmount     Decimal  @db.Decimal(10, 2)
-  discount        Decimal  @db.Decimal(10, 2) @default(0)
+  totalAmount    Decimal  @db.Decimal(10, 2)
+  discount       Decimal  @default(0) @db.Decimal(10, 2)
+  couponCode     String?
+  cashbackUsed   Decimal  @default(0) @db.Decimal(10, 2)
+  pointsUsed     Int      @default(0)
+  pointsEarned   Int      @default(0)
+  cashbackEarned Decimal  @default(0) @db.Decimal(10, 2)
   // Valor em dinheiro que o cliente vai entregar, para calcular o troco.
-  changeFor       Decimal? @db.Decimal(10, 2)
+  changeFor      Decimal? @db.Decimal(10, 2)
   // Troco devido = changeFor - totalAmount (calculado e persistido na venda).
-  changeAmount    Decimal? @db.Decimal(10, 2)
+  changeAmount   Decimal? @db.Decimal(10, 2)
 
   // Forma PRINCIPAL de pagamento: a de maior valor entre `payments`. Mantida
   // porque relatorios e o DRE ja a consultam. O detalhe real de quem pagou o
   // que vive em `payments`, que aceita varias formas na mesma venda.
-  paymentMethod   String   @default("cash")    // cash | credit | debit | pix | voucher | fiado
-  paymentStatus   String   @default("pending") // pending | paid
+  paymentMethod   String    @default("cash") // cash | credit | debit | pix | voucher | fiado
+  paymentStatus   String    @default("pending") // pending | paid
   observations    String?
-  printedKitchen  Boolean  @default(false)
-  printedDelivery Boolean  @default(false)
+  printedKitchen  Boolean   @default(false)
+  printedDelivery Boolean   @default(false)
+  // Prioridade operacional do KDS. O motivo e obrigatorio ao ativar pela API.
+  priority        Boolean   @default(false)
+  priorityReason  String?
+  prioritizedAt   DateTime?
   // Distância em km para cálculo logístico
-  distanceKm      Decimal? @db.Decimal(8, 2)
+  distanceKm      Decimal?  @db.Decimal(8, 2)
   // Endereço de entrega denormalizado para histórico
   deliveryAddress String?
   /// Quando o pedido foi entregue.
@@ -379,42 +548,45 @@ model Order {
   deliveredAt     DateTime?
   // Token aleatorio usado no acompanhamento publico. O numero do pedido e
   // exibivel e sequencial; nunca deve funcionar como credencial.
-  publicToken     String?  @unique
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  publicToken     String?   @unique
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   // Multi-Tenant
-  tenantId        String
-  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   // Relações
-  customerId      String?
-  customer        Customer? @relation(fields: [customerId], references: [id])
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
 
-  createdById     String?
-  createdBy       User?    @relation(fields: [createdById], references: [id])
+  createdById String?
+  createdBy   User?   @relation(fields: [createdById], references: [id])
 
   // Canal de venda pelo qual o pedido veio
-  salesChannelId  String?
-  salesChannel    SalesChannel? @relation(fields: [salesChannelId], references: [id])
+  salesChannelId String?
+  salesChannel   SalesChannel? @relation(fields: [salesChannelId], references: [id])
 
   // Turno de caixa em que a venda foi registrada. Sem esse vinculo o
   // fechamento nao teria como somar as vendas do turno, e a conferencia de
   // dinheiro em gaveta seria um chute.
-  cashRegisterId  String?
-  cashRegister    CashRegister? @relation(fields: [cashRegisterId], references: [id])
+  cashRegisterId String?
+  cashRegister   CashRegister? @relation(fields: [cashRegisterId], references: [id])
 
-  orderItems      OrderItem[]
-  payments        OrderPayment[]
-  delivery        Delivery?
-  deliveryQuote   DeliveryQuote?
-  events          OrderEvent[]
+  orderItems        OrderItem[]
+  payments          OrderPayment[]
+  delivery          Delivery?
+  deliveryQuote     DeliveryQuote?
+  events            OrderEvent[]
+  couponRedemption  CouponRedemption?
+  accountReceivable AccountReceivable?
 
   @@unique([orderNumber, tenantId])
   @@index([tenantId])
   @@index([customerId])
   @@index([createdById])
   @@index([cashRegisterId])
+  @@index([tenantId, priority, createdAt])
   @@map("orders")
 }
 
@@ -442,16 +614,16 @@ model OrderEvent {
   note       String?
   createdAt  DateTime @default(now())
 
-  tenantId   String
-  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  orderId    String
-  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   /// Quem fez. Fica opcional porque pedido de integracao (iFood) entra sem
   /// operador humano, e um `actorId` obrigatorio obrigaria a inventar um usuario.
-  actorId    String?
-  actor      User?    @relation(fields: [actorId], references: [id])
+  actorId String?
+  actor   User?   @relation(fields: [actorId], references: [id])
 
   /// O feed sempre le "os ultimos do dia deste tenant", nesta ordem exata.
   @@index([tenantId, createdAt])
@@ -467,19 +639,19 @@ model OrderEvent {
 /// modelo antigo. O troco fica aqui, na linha em dinheiro, e nao no pedido:
 /// so a parcela em especie gera troco.
 model OrderPayment {
-  id            String   @id @default(cuid())
-  method        String                              // cash | credit | debit | pix | voucher | fiado
-  amount        Decimal  @db.Decimal(10, 2)
+  id           String   @id @default(cuid())
+  method       String // cash | credit | debit | pix | voucher | fiado
+  amount       Decimal  @db.Decimal(10, 2)
   /// Valor em especie entregue pelo cliente nesta parcela.
-  changeFor     Decimal? @db.Decimal(10, 2)
+  changeFor    Decimal? @db.Decimal(10, 2)
   /// Troco desta parcela = changeFor - amount.
-  changeAmount  Decimal? @db.Decimal(10, 2)
+  changeAmount Decimal? @db.Decimal(10, 2)
   /// Bandeira/adquirente, quando cartao (ex.: "Visa", "Master").
-  cardBrand     String?
-  createdAt     DateTime @default(now())
+  cardBrand    String?
+  createdAt    DateTime @default(now())
 
-  orderId       String
-  order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
   @@map("order_payments")
@@ -487,83 +659,121 @@ model OrderPayment {
 
 // ========== ORDER ITEM MODEL ==========
 model OrderItem {
-  id                  String   @id @default(cuid())
+  id                  String  @id @default(cuid())
   quantity            Int
-  unitPrice           Decimal  @db.Decimal(10, 2)
-  subtotal            Decimal  @db.Decimal(10, 2)
-  observations        String?                       // ex: "sem cebola"
-  selectedProteinId   String?                       // ingredientId da proteína escolhida no combo
-  selectedProteinName String?                       // nome para denormalizar na impressão
+  unitPrice           Decimal @db.Decimal(10, 2)
+  subtotal            Decimal @db.Decimal(10, 2)
+  observations        String? // ex: "sem cebola"
+  selectedProteinId   String? // ingredientId da proteína escolhida no combo
+  selectedProteinName String? // nome para denormalizar na impressão
 
   // Adicionais escolhidos, congelados no momento da venda para o histórico:
   // [{ "addonId": "...", "name": "Bacon extra", "price": 4.00, "quantity": 1 }]
-  addons              Json?
+  addons                 Json?
   // Soma dos adicionais deste item (já multiplicada pela quantidade).
-  addonsTotal         Decimal  @db.Decimal(10, 2) @default(0)
+  addonsTotal            Decimal   @default(0) @db.Decimal(10, 2)
+  // Estado de producao independente: um pedido pode ter bebida pronta enquanto
+  // a grelha ainda prepara o prato. Os dados da estacao ficam congelados aqui.
+  productionStatus       String    @default("pending") // pending | preparing | ready
+  preparationStation     String    @default("Cozinha")
+  preparationTimeMinutes Int       @default(15)
+  startedAt              DateTime?
+  readyAt                DateTime?
+  // Comanda desta estacao enviada para impressao neste dispositivo.
+  printedAt              DateTime?
 
   // Relações
-  orderId         String
-  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  
-  productId       String
-  product         Product  @relation(fields: [productId], references: [id])
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
 
   @@index([orderId])
   @@index([productId])
+  @@index([productionStatus, preparationStation])
   @@map("order_items")
 }
 
 // ========== DELIVERY MODEL ==========
 model Delivery {
-  id              String   @id @default(cuid())
-  status          String   @default("pending") // pending, assigned, in_transit, delivered, failed
-  estimatedTime   DateTime?
-  actualTime      DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                   String    @id @default(cuid())
+  status               String    @default("pending") // pending, assigned, in_transit, delivered, failed
+  estimatedTime        DateTime?
+  actualTime           DateTime?
+  assignedAt           DateTime?
+  pickedUpAt           DateTime?
+  deliveryCode         String?
+  recipientName        String?
+  proofNotes           String?
+  pickupToken          String?   @unique
+  pickupTokenExpiresAt DateTime?
+  driverUserId         String?
+  routeBatchId         String?
+  routePosition        Int?
+  routeStartedAt       DateTime?
+  destinationLatitude  Float?
+  destinationLongitude Float?
+  estimatedArrivalAt   DateTime?
+  dispatchMode         String    @default("own_fleet") // own_fleet | external | manual
+  externalCourierName  String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   // Multi-Tenant
-  tenantId        String
-  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   // Relações
-  orderId         String   @unique
-  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  
-  assignedToId    String?
-  assignedTo      User?    @relation(fields: [assignedToId], references: [id])
+  orderId String @unique
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  assignedToId String?
+  assignedTo   User?   @relation(fields: [assignedToId], references: [id])
+
+  courierId String?
+  courier   Fleet?  @relation(fields: [courierId], references: [id])
+
+  driverUser User? @relation("DeliveryDriver", fields: [driverUserId], references: [id])
 
   @@index([tenantId])
   @@index([assignedToId])
+  @@index([courierId])
+  @@index([driverUserId, status, routePosition])
+  @@index([tenantId, routeBatchId])
+  @@index([tenantId, status, createdAt])
   @@map("deliveries")
 }
 
 // ========== INGREDIENT MODEL ==========
 model Ingredient {
-  id              String   @id @default(cuid())
-  name            String
-  description     String?
-  sku             String
+  id             String   @id @default(cuid())
+  name           String
+  description    String?
+  sku            String
   // Código de barras/EAN da embalagem, lido pela câmera do celular (requisito 4).
-  barcode         String?
-  unit            String   // kg, l, un, g, ml, etc
-  price           Decimal  @db.Decimal(10, 2) // Preço unitário
-  breakageFactor  Decimal  @db.Decimal(5, 2) @default(0.00) // % de perda/quebra
+  barcode        String?
+  unit           String // kg, l, un, g, ml, etc
+  price          Decimal  @db.Decimal(10, 2) // Preço unitário
+  breakageFactor Decimal  @default(0.00) @db.Decimal(5, 2) // % de perda/quebra
   // Estoque em unidades fracionadas (kg/l exigem decimal, não inteiro).
-  stock           Decimal  @db.Decimal(12, 4) @default(0)
-  minimumStock    Decimal  @db.Decimal(12, 4) @default(0)
-  active          Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  stock          Decimal  @default(0) @db.Decimal(12, 4)
+  minimumStock   Decimal  @default(0) @db.Decimal(12, 4)
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   // Multi-Tenant
-  tenantId        String
-  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   // Relações
   productIngredients ProductIngredient[]
   invoiceItems       InvoiceItem[]
   stockMovements     StockMovement[]
+  purchaseOrderItems PurchaseOrderItem[]
+  stockLots          StockLot[]
+  inventoryItems     InventoryCountItem[]
 
   @@unique([sku, tenantId])
   @@unique([barcode, tenantId])
@@ -577,7 +787,7 @@ model Ingredient {
 // para leitura rapida, enquanto este livro explica como ele chegou ali.
 model StockMovement {
   id            String   @id @default(cuid())
-  type          String   // entry | exit | adjustment | sale | return | invoice | initial
+  type          String // entry | exit | adjustment | sale | return | invoice | initial
   delta         Decimal  @db.Decimal(12, 4)
   balanceBefore Decimal  @db.Decimal(12, 4)
   balanceAfter  Decimal  @db.Decimal(12, 4)
@@ -586,38 +796,113 @@ model StockMovement {
   sourceId      String?
   createdAt     DateTime @default(now())
 
-  tenantId      String
-  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  ingredientId  String
-  ingredient    Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+  ingredientId String
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
 
-  actorId       String?
-  actor         User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actorId String?
+  actor   User?   @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  lotId String?
+  lot   StockLot? @relation(fields: [lotId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, createdAt])
   @@index([ingredientId, createdAt])
   @@index([actorId])
+  @@index([lotId])
   @@map("stock_movements")
+}
+
+// ========== LOTES E VALIDADE ==========
+// O saldo agregado continua em Ingredient.stock para leitura rapida. Esta
+// tabela detalha as entradas que precisam de rastreio por lote e vencimento.
+model StockLot {
+  id         String    @id @default(cuid())
+  code       String
+  quantity   Decimal   @db.Decimal(12, 4)
+  receivedAt DateTime  @default(now())
+  expiresAt  DateTime?
+  unitCost   Decimal?  @db.Decimal(10, 4)
+  notes      String?
+  active     Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  ingredientId String
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+
+  movements StockMovement[]
+
+  @@unique([tenantId, ingredientId, code])
+  @@index([tenantId, expiresAt])
+  @@index([ingredientId, active])
+  @@map("stock_lots")
+}
+
+// ========== INVENTARIO FISICO ==========
+// Cada contagem guarda o esperado, o contado e a diferenca aplicada. Assim o
+// ajuste nunca vira uma sobrescrita sem explicacao no livro de estoque.
+model InventoryCount {
+  id              String   @id @default(cuid())
+  reference       String
+  notes           String?
+  itemCount       Int      @default(0)
+  differenceCount Int      @default(0)
+  actorId         String?
+  createdAt       DateTime @default(now())
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  items InventoryCountItem[]
+
+  @@unique([tenantId, reference])
+  @@index([tenantId, createdAt])
+  @@map("inventory_counts")
+}
+
+model InventoryCountItem {
+  id          String  @id @default(cuid())
+  expectedQty Decimal @db.Decimal(12, 4)
+  countedQty  Decimal @db.Decimal(12, 4)
+  difference  Decimal @db.Decimal(12, 4)
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  inventoryId String
+  inventory   InventoryCount @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+
+  ingredientId String
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+
+  @@unique([inventoryId, ingredientId])
+  @@index([tenantId, ingredientId])
+  @@map("inventory_count_items")
 }
 
 // ========== DRE CATEGORY MODEL ==========
 // Categorias do DRE (ex: CMV, Mão de Obra, Aluguel, Energia...)
 model DreCategory {
-  id              String   @id @default(cuid())
-  name            String                        // ex: "Custo de Mercadoria Vendida"
-  code            String                        // ex: "CMV", "MOD", "ALUGUEL"
-  type            String                        // revenue | expense | cogs
-  parentId        String?                       // Para sub-categorias (DRE hierárquico)
-  parent          DreCategory?  @relation("DreCategoryHierarchy", fields: [parentId], references: [id])
-  children        DreCategory[] @relation("DreCategoryHierarchy")
-  active          Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id        String        @id @default(cuid())
+  name      String // ex: "Custo de Mercadoria Vendida"
+  code      String // ex: "CMV", "MOD", "ALUGUEL"
+  type      String // revenue | expense | cogs
+  parentId  String? // Para sub-categorias (DRE hierárquico)
+  parent    DreCategory?  @relation("DreCategoryHierarchy", fields: [parentId], references: [id])
+  children  DreCategory[] @relation("DreCategoryHierarchy")
+  active    Boolean       @default(true)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
 
   // Multi-Tenant
-  tenantId        String
-  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   // Relações
   accountsPayable AccountPayable[]
@@ -630,31 +915,31 @@ model DreCategory {
 // ========== CASH REGISTER (CAIXA) ==========
 // Representa uma sessão de caixa aberta/fechada
 model CashRegister {
-  id              String   @id @default(cuid())
-  openedAt        DateTime @default(now())
+  id              String    @id @default(cuid())
+  openedAt        DateTime  @default(now())
   closedAt        DateTime?
-  openingBalance  Decimal  @db.Decimal(10, 2) @default(0)
-  closingBalance  Decimal? @db.Decimal(10, 2)
-  expectedBalance Decimal? @db.Decimal(10, 2)
-  difference      Decimal? @db.Decimal(10, 2)   // closingBalance - expectedBalance
-  status          String   @default("open")      // open | closed
+  openingBalance  Decimal   @default(0) @db.Decimal(10, 2)
+  closingBalance  Decimal?  @db.Decimal(10, 2)
+  expectedBalance Decimal?  @db.Decimal(10, 2)
+  difference      Decimal?  @db.Decimal(10, 2) // closingBalance - expectedBalance
+  status          String    @default("open") // open | closed
   notes           String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   // Multi-Tenant
-  tenantId        String
-  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   // Relações
-  openedById      String
-  openedBy        User     @relation("CashOpenedBy", fields: [openedById], references: [id])
+  openedById String
+  openedBy   User    @relation("CashOpenedBy", fields: [openedById], references: [id])
   // Quem fechou pode nao ser quem abriu (troca de turno).
-  closedById      String?
-  closedBy        User?    @relation("CashClosedBy", fields: [closedById], references: [id])
+  closedById String?
+  closedBy   User?   @relation("CashClosedBy", fields: [closedById], references: [id])
 
-  cashEntries     CashEntry[]
-  orders          Order[]
+  cashEntries CashEntry[]
+  orders      Order[]
 
   @@index([tenantId])
   @@index([status])
@@ -676,22 +961,22 @@ model CashRegister {
 /// entram no faturamento do turno mas nao na conferencia da gaveta — misturar
 /// os dois era a causa classica de "caixa sempre sobrando".
 model CashEntry {
-  id              String       @id @default(cuid())
-  type            String                          // sale | supply | withdrawal | expense | refund
-  amount          Decimal      @db.Decimal(10, 2)
-  description     String
-  paymentMethod   String       @default("cash")   // cash | credit | debit | pix | voucher | fiado
-  referenceType   String?                         // order | invoice | manual
-  referenceId     String?                         // id do pedido/nota vinculado
-  createdAt       DateTime     @default(now())
+  id            String   @id @default(cuid())
+  type          String // sale | supply | withdrawal | expense | refund
+  amount        Decimal  @db.Decimal(10, 2)
+  description   String
+  paymentMethod String   @default("cash") // cash | credit | debit | pix | voucher | fiado
+  referenceType String? // order | invoice | manual
+  referenceId   String? // id do pedido/nota vinculado
+  createdAt     DateTime @default(now())
 
   // Quem lancou: sangria e despesa precisam de responsavel nomeado.
-  createdById     String?
-  createdBy       User?        @relation(fields: [createdById], references: [id])
+  createdById String?
+  createdBy   User?   @relation(fields: [createdById], references: [id])
 
   // Relações
-  cashRegisterId  String
-  cashRegister    CashRegister @relation(fields: [cashRegisterId], references: [id], onDelete: Cascade)
+  cashRegisterId String
+  cashRegister   CashRegister @relation(fields: [cashRegisterId], references: [id], onDelete: Cascade)
 
   @@index([cashRegisterId])
   @@index([type])
@@ -700,62 +985,227 @@ model CashEntry {
 
 // ========== ACCOUNT PAYABLE (CONTAS A PAGAR) ==========
 model AccountPayable {
-  id              String      @id @default(cuid())
-  description     String
-  supplierName    String
-  supplierDoc     String?                         // CNPJ/CPF do fornecedor
-  amount          Decimal     @db.Decimal(10, 2)
-  amountPaid      Decimal     @db.Decimal(10, 2) @default(0)
-  dueDate         DateTime
-  paidAt          DateTime?
-  status          String      @default("pending") // pending | partial | paid | overdue
-  invoiceNumber   String?                         // Número da NF
-  invoiceId       String?                         // FK para Invoice se vier de NF
-  notes           String?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  id            String    @id @default(cuid())
+  description   String
+  supplierName  String
+  supplierDoc   String? // CNPJ/CPF do fornecedor
+  amount        Decimal   @db.Decimal(10, 2)
+  amountPaid    Decimal   @default(0) @db.Decimal(10, 2)
+  dueDate       DateTime
+  paidAt        DateTime?
+  status        String    @default("pending") // pending | partial | paid | overdue
+  invoiceNumber String? // Número da NF
+  invoiceId     String? // FK para Invoice se vier de NF
+  notes         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   // Multi-Tenant
-  tenantId        String
-  tenant          Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   // Categoria DRE
-  dreCategoryId   String?
-  dreCategory     DreCategory? @relation(fields: [dreCategoryId], references: [id])
+  dreCategoryId String?
+  dreCategory   DreCategory? @relation(fields: [dreCategoryId], references: [id])
+
+  purchaseOrderId String?        @unique
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
 
   @@index([tenantId])
   @@index([dreCategoryId])
   @@map("accounts_payable")
 }
 
+// Valor que ainda precisa entrar. Vendas em fiado geram esta obrigacao; a
+// mesma estrutura tambem aceita cobrancas manuais e parceladas.
+model AccountReceivable {
+  id             String    @id @default(cuid())
+  description    String
+  amount         Decimal   @db.Decimal(10, 2)
+  amountReceived Decimal   @default(0) @db.Decimal(10, 2)
+  dueDate        DateTime
+  receivedAt     DateTime?
+  paymentMethod  String?
+  installment    Int       @default(1)
+  installments   Int       @default(1)
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  tenantId   String
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  orderId    String?   @unique
+  order      Order?    @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, dueDate])
+  @@index([customerId])
+  @@map("accounts_receivable")
+}
+
+// ========== SUPPLIERS AND PURCHASE ORDERS ==========
+model Supplier {
+  id              String   @id @default(cuid())
+  name            String
+  document        String?
+  contactName     String?
+  phone           String?
+  email           String?
+  paymentTermDays Int      @default(0)
+  notes           String?
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  purchaseOrders PurchaseOrder[]
+
+  @@unique([document, tenantId])
+  @@index([tenantId, active])
+  @@map("suppliers")
+}
+
+model PurchaseOrder {
+  id                   String    @id @default(cuid())
+  orderNumber          String
+  status               String    @default("draft") // draft | pending_approval | approved | ordered | partially_received | received | cancelled
+  totalAmount          Decimal   @default(0) @db.Decimal(12, 2)
+  expectedDeliveryDate DateTime?
+  notes                String?
+  submittedAt          DateTime?
+  approvedAt           DateTime?
+  orderedAt            DateTime?
+  receivedAt           DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Compra formal aponta para um fornecedor cadastrado. Compra rápida pode
+  // guardar apenas o nome visto no cupom, sem criar cadastro ou exigir CNPJ.
+  supplierId String?
+  supplier   Supplier? @relation(fields: [supplierId], references: [id])
+
+  purchaseMode     String  @default("formal") // formal | quick
+  quickVendorName  String?
+  paymentMethod    String? // cash | pix | credit | debit | transfer | later
+  hasReceiptImage  Boolean @default(false)
+  receiptImageData String? @db.Text
+
+  createdById  String?
+  createdBy    User?   @relation("PurchaseOrderCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  approvedById String?
+  approvedBy   User?   @relation("PurchaseOrderApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  receivedById String?
+  receivedBy   User?   @relation("PurchaseOrderReceivedBy", fields: [receivedById], references: [id], onDelete: SetNull)
+
+  items          PurchaseOrderItem[]
+  receipts       PurchaseReceipt[]
+  accountPayable AccountPayable?
+
+  @@unique([orderNumber, tenantId])
+  @@index([tenantId, status, createdAt])
+  @@index([supplierId])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id               String   @id @default(cuid())
+  orderedQuantity  Decimal  @db.Decimal(12, 4)
+  receivedQuantity Decimal  @default(0) @db.Decimal(12, 4)
+  purchaseUnit     String
+  conversionFactor Decimal  @default(1) @db.Decimal(12, 4)
+  unitPrice        Decimal  @db.Decimal(12, 4)
+  subtotal         Decimal  @db.Decimal(12, 2)
+  createdAt        DateTime @default(now())
+
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  ingredientId String
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id])
+
+  receiptItems PurchaseReceiptItem[]
+
+  @@unique([purchaseOrderId, ingredientId])
+  @@index([ingredientId])
+  @@map("purchase_order_items")
+}
+
+model PurchaseReceipt {
+  id            String   @id @default(cuid())
+  receiptNumber String
+  invoiceNumber String?
+  notes         String?
+  totalAmount   Decimal  @default(0) @db.Decimal(12, 2)
+  createdAt     DateTime @default(now())
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  receivedById String?
+  receivedBy   User?   @relation(fields: [receivedById], references: [id], onDelete: SetNull)
+
+  items PurchaseReceiptItem[]
+
+  @@unique([purchaseOrderId, receiptNumber])
+  @@index([tenantId, createdAt])
+  @@map("purchase_receipts")
+}
+
+model PurchaseReceiptItem {
+  id               String  @id @default(cuid())
+  receivedQuantity Decimal @db.Decimal(12, 4)
+  stockQuantity    Decimal @db.Decimal(12, 4)
+  unitPrice        Decimal @db.Decimal(12, 4)
+  subtotal         Decimal @db.Decimal(12, 2)
+
+  receiptId String
+  receipt   PurchaseReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+
+  purchaseOrderItemId String
+  purchaseOrderItem   PurchaseOrderItem @relation(fields: [purchaseOrderItemId], references: [id], onDelete: Cascade)
+
+  @@unique([receiptId, purchaseOrderItemId])
+  @@index([purchaseOrderItemId])
+  @@map("purchase_receipt_items")
+}
+
 // ========== INVOICE (NOTA FISCAL) ==========
 // Cabeçalho da NF importada (XML SEFAZ)
 model Invoice {
-  id              String        @id @default(cuid())
-  chaveAcesso     String        @unique            // Chave de 44 dígitos da NF-e
+  id              String   @id @default(cuid())
+  chaveAcesso     String   @unique // Chave de 44 dígitos da NF-e
   numero          String
   serie           String
-  emitente        String                           // Razão social do fornecedor
-  emitenteDoc     String                           // CNPJ do emitente
+  emitente        String // Razão social do fornecedor
+  emitenteDoc     String // CNPJ do emitente
   emitenteCidade  String?
   emitentUF       String?
-  destinatarioDoc String?                          // CNPJ do destinatário (tenant)
+  destinatarioDoc String? // CNPJ do destinatário (tenant)
   dataEmissao     DateTime
-  valorTotal      Decimal       @db.Decimal(10, 2)
-  valorFrete      Decimal       @db.Decimal(10, 2) @default(0)
-  valorDesconto   Decimal       @db.Decimal(10, 2) @default(0)
-  valorImposto    Decimal       @db.Decimal(10, 2) @default(0)
-  status          String        @default("imported") // imported | processed | cancelled
-  xmlRaw          String?       @db.Text            // XML original armazenado
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  valorTotal      Decimal  @db.Decimal(10, 2)
+  valorFrete      Decimal  @default(0) @db.Decimal(10, 2)
+  valorDesconto   Decimal  @default(0) @db.Decimal(10, 2)
+  valorImposto    Decimal  @default(0) @db.Decimal(10, 2)
+  status          String   @default("imported") // imported | processed | cancelled
+  xmlRaw          String?  @db.Text // XML original armazenado
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   // Multi-Tenant
-  tenantId        String
-  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   // Relações
-  items           InvoiceItem[]
+  items InvoiceItem[]
 
   @@index([tenantId])
   @@map("invoices")
@@ -763,23 +1213,23 @@ model Invoice {
 
 // ========== INVOICE ITEM (ITENS DA NOTA FISCAL) ==========
 model InvoiceItem {
-  id              String    @id @default(cuid())
-  numeroItem      Int
-  codigoProduto   String                           // Código do produto no fornecedor
-  descricao       String
-  ncm             String?                          // NCM (classificação fiscal)
-  cfop            String?                          // CFOP
-  unit            String
-  quantity        Decimal   @db.Decimal(10, 4)
-  unitPrice       Decimal   @db.Decimal(10, 4)    // Preço unitário na nota
-  totalPrice      Decimal   @db.Decimal(10, 2)
+  id            String      @id @default(cuid())
+  numeroItem    Int
+  codigoProduto String // Código do produto no fornecedor
+  descricao     String
+  ncm           String? // NCM (classificação fiscal)
+  cfop          String? // CFOP
+  unit          String
+  quantity      Decimal     @db.Decimal(10, 4)
+  unitPrice     Decimal     @db.Decimal(10, 4) // Preço unitário na nota
+  totalPrice    Decimal     @db.Decimal(10, 2)
   // Link com ingrediente interno (mapeado durante a importação)
-  ingredientId    String?
-  ingredient      Ingredient? @relation(fields: [ingredientId], references: [id])
+  ingredientId  String?
+  ingredient    Ingredient? @relation(fields: [ingredientId], references: [id])
 
   // Relações
-  invoiceId       String
-  invoice         Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
   @@index([invoiceId])
   @@index([ingredientId])
@@ -789,30 +1239,30 @@ model InvoiceItem {
 // ========== SALES CHANNEL ==========
 // Define cada canal de venda (iFood, WhatsApp, Balcão, etc.)
 model SalesChannel {
-  id              String   @id @default(cuid())
-  name            String                          // ex: "iFood", "WhatsApp", "Balcao"
-  slug            String                          // ex: "ifood", "whatsapp", "balcao"
-  active          Boolean  @default(true)
+  id               String   @id @default(cuid())
+  name             String // ex: "iFood", "WhatsApp", "Balcao"
+  slug             String // ex: "ifood", "whatsapp", "balcao"
+  active           Boolean  @default(true)
   // Taxa da plataforma em % (ex: 27.0 para iFood)
-  platformFeePerc Decimal  @db.Decimal(5, 2) @default(0)
+  platformFeePerc  Decimal  @default(0) @db.Decimal(5, 2)
   // Taxa fixa por pedido em R$ (ex: R$1.00 por pedido no app)
-  platformFeeFixed Decimal @db.Decimal(10, 2) @default(0)
+  platformFeeFixed Decimal  @default(0) @db.Decimal(10, 2)
   // Taxa de pagamento em % (maquininha, gateway, etc.)
-  paymentFeePerc  Decimal  @db.Decimal(5, 2) @default(0)
+  paymentFeePerc   Decimal  @default(0) @db.Decimal(5, 2)
   // Margem mínima desejada após todas as taxas (%)
-  targetMarginPerc Decimal @db.Decimal(5, 2) @default(30)
+  targetMarginPerc Decimal  @default(30) @db.Decimal(5, 2)
   // Multiplicador manual extra (ex: 1.05 = +5% sobre o calculado)
-  manualMultiplier Decimal @db.Decimal(5, 4) @default(1.0000)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  manualMultiplier Decimal  @default(1.0000) @db.Decimal(5, 4)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   // Multi-Tenant
-  tenantId        String
-  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   // Relações
-  pricingRules    PricingRule[]
-  orders          Order[]
+  pricingRules PricingRule[]
+  orders       Order[]
 
   @@unique([slug, tenantId])
   @@index([tenantId])
@@ -822,31 +1272,31 @@ model SalesChannel {
 // ========== PRICING RULE ==========
 // Preço calculado de cada produto por canal (snapshot para auditoria)
 model PricingRule {
-  id              String   @id @default(cuid())
+  id             String   @id @default(cuid())
   // Preço de custo total (CMV + mão de obra)
-  costPrice       Decimal  @db.Decimal(10, 4)
+  costPrice      Decimal  @db.Decimal(10, 4)
   // Markup calculado pelo sistema
-  markupPerc      Decimal  @db.Decimal(7, 4)
+  markupPerc     Decimal  @db.Decimal(7, 4)
   // Preço sugerido pelo sistema (antes do arredondamento)
-  suggestedPrice  Decimal  @db.Decimal(10, 2)
+  suggestedPrice Decimal  @db.Decimal(10, 2)
   // Preço final aprovado (pode ser editado manualmente)
-  finalPrice      Decimal  @db.Decimal(10, 2)
+  finalPrice     Decimal  @db.Decimal(10, 2)
   // Margem real resultante após taxas (%)
-  realMarginPerc  Decimal  @db.Decimal(7, 4)
-  active          Boolean  @default(true)
-  calculatedAt    DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  realMarginPerc Decimal  @db.Decimal(7, 4)
+  active         Boolean  @default(true)
+  calculatedAt   DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   // Multi-Tenant
-  tenantId        String
-  tenant          Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   // Relações
-  productId       String
-  product         Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
-  channelId       String
-  salesChannel    SalesChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  channelId    String
+  salesChannel SalesChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
 
   @@unique([productId, channelId])
   @@index([tenantId])
@@ -858,63 +1308,77 @@ model PricingRule {
 // ========== FLEET (FROTA PRÓPRIA) ==========
 // Cada motoboy ou veículo da frota
 model Fleet {
-  id              String   @id @default(cuid())
-  name            String                          // Nome do motoboy / veículo
-  vehicleType     String   @default("moto")       // moto | carro | bicicleta
+  id                String    @id @default(cuid())
+  name              String // Nome do motoboy / veículo
+  phone             String?
+  vehicleType       String    @default("moto") // moto | carro | bicicleta
+  plate             String?
+  availability      String    @default("available") // available | busy | offline
   // Consumo médio em km/l (ou km/kWh para elétrico)
-  kmPerLiter      Decimal  @db.Decimal(6, 2) @default(20)
+  kmPerLiter        Decimal   @default(20) @db.Decimal(6, 2)
   // Custo médio do combustível por litro em R$
-  fuelCostPerLiter Decimal @db.Decimal(6, 2) @default(6.50)
+  fuelCostPerLiter  Decimal   @default(6.50) @db.Decimal(6, 2)
   // Taxa fixa paga ao motoboy por corrida (R$)
-  deliveryFee     Decimal  @db.Decimal(10, 2) @default(0)
+  deliveryFee       Decimal   @default(0) @db.Decimal(10, 2)
   // Taxa por km rodado além do raio base (R$/km)
-  feePerKm        Decimal  @db.Decimal(6, 2) @default(0)
+  feePerKm          Decimal   @default(0) @db.Decimal(6, 2)
   // Raio base em km já coberto pela deliveryFee
-  baseRadiusKm    Decimal  @db.Decimal(6, 2) @default(3)
-  active          Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  baseRadiusKm      Decimal   @default(3) @db.Decimal(6, 2)
+  active            Boolean   @default(true)
+  currentLatitude   Float?
+  currentLongitude  Float?
+  locationAccuracy  Float?
+  locationHeading   Float?
+  locationUpdatedAt DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   // Multi-Tenant
-  tenantId        String
-  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   // Relações
-  deliveryQuotes  DeliveryQuote[]
+  deliveryQuotes DeliveryQuote[]
+  deliveries     Delivery[]
 
+  driverUserId String?
+  driverUser   User?   @relation("FleetDriverAccount", fields: [driverUserId], references: [id])
+
+  @@unique([tenantId, driverUserId])
   @@index([tenantId])
+  @@index([tenantId, availability, active])
   @@map("fleet")
 }
 
 // ========== DELIVERY QUOTE (COTAÇÃO DE ENTREGA) ==========
 // Snapshot da decisão logística no momento do fechamento do pedido
 model DeliveryQuote {
-  id                  String   @id @default(cuid())
-  distanceKm          Decimal  @db.Decimal(8, 2)
+  id                String    @id @default(cuid())
+  distanceKm        Decimal   @db.Decimal(8, 2)
   // Custo calculado para frota própria
-  ownFleetCost        Decimal  @db.Decimal(10, 2)
-  ownFleetBreakdown   Json                         // { fuel, driverFee, extraKmFee }
+  ownFleetCost      Decimal   @db.Decimal(10, 2)
+  ownFleetBreakdown Json // { fuel, driverFee, extraKmFee }
   // Custo estimado do app (iFood/Rappi taxa reversa)
-  appDeliveryCost     Decimal  @db.Decimal(10, 2)
+  appDeliveryCost   Decimal   @db.Decimal(10, 2)
   // Recomendação do sistema
-  recommendation      String                       // own_fleet | app_delivery
+  recommendation    String // own_fleet | app_delivery
   // Economia estimada em R$ ao seguir a recomendação
-  estimatedSaving     Decimal  @db.Decimal(10, 2)
+  estimatedSaving   Decimal   @db.Decimal(10, 2)
   // Decisão final tomada pelo operador
-  chosenOption        String?                      // own_fleet | app_delivery
-  decidedAt           DateTime?
-  createdAt           DateTime @default(now())
+  chosenOption      String? // own_fleet | app_delivery
+  decidedAt         DateTime?
+  createdAt         DateTime  @default(now())
 
   // Multi-Tenant
-  tenantId        String
-  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   // Relações
-  orderId         String   @unique
-  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId String @unique
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
-  fleetId         String?
-  fleet           Fleet?   @relation(fields: [fleetId], references: [id])
+  fleetId String?
+  fleet   Fleet?  @relation(fields: [fleetId], references: [id])
 
   @@index([tenantId])
   @@map("delivery_quotes")

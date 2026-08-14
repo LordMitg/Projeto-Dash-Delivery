@@ -41,6 +41,12 @@ const tenantSelect = {
   deliveryFeeBase: true,
   deliveryZones: true,
   printSettings: true,
+  couponsEnabled: true,
+  loyaltyPointsEnabled: true,
+  cashbackEnabled: true,
+  pointsPerReal: true,
+  pointRedemptionValue: true,
+  cashbackPercent: true,
 } as const
 
 /** Monta a lista de negocios da conta, para o alternador do cabecalho. */

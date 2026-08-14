@@ -47,6 +47,10 @@ const PrinterSettings = lazy(() =>
 const DeliveryZones = lazy(() =>
   import('../components/DeliveryZones').then((m) => ({ default: m.DeliveryZones })),
 )
+const DeliveriesPage = lazy(() => import('./DeliveriesPage'))
+const DriverDeliveryPage = lazy(() => import('./DriverDeliveryPage'))
+const PurchasesPage = lazy(() => import('./PurchasesPage'))
+const CustomersPage = lazy(() => import('./CustomersPage'))
 // Telas do dono: um funcionario nunca as abre, entao nao ha motivo para elas
 // pesarem no primeiro carregamento do PDV.
 const MyBusinessPage = lazy(() => import('./MyBusinessPage'))
@@ -55,6 +59,7 @@ const EmployeesPage = lazy(() => import('./EmployeesPage'))
 // existirem, e o clique em "Abrir o caixa" nao levava a lugar nenhum.
 const CashRegisterPage = lazy(() => import('./CashRegisterPage'))
 const PayablesPage = lazy(() => import('./PayablesPage'))
+const FinancePage = lazy(() => import('./FinancePage'))
 const PricingPanel = lazy(() => import('../components/PricingPanel'))
 const InvoiceImporter = lazy(() => import('../components/InvoiceImporter'))
 
@@ -85,6 +90,7 @@ export function App() {
   // early returns de `loading` / `!isAuthenticated`.
   const location = useLocation()
   const isPdvRoute = location.pathname.startsWith('/pdv')
+  const isDriverRoute = location.pathname.startsWith('/entregador')
   const isPublicRoute =
     location.pathname.startsWith('/loja/') || location.pathname.startsWith('/pedido/')
 
@@ -116,6 +122,12 @@ export function App() {
   // <Routes> abaixo pressupoe token, e montar o menu antes disso dispararia
   // requisicoes que voltariam 401.
   if (!isAuthenticated) return <AuthGate />
+
+  // O entregador trabalha pelo celular e nao precisa carregar o ERP inteiro.
+  if (isDriverRoute) {
+    if (!can('delivery:drive')) return <Navigate to="/sem-acesso" replace />
+    return <Suspense fallback={<div className="grid min-h-screen place-items-center bg-[#fff8ee]"><Loader2 className="h-7 w-7 animate-spin text-[#4a103a]" /></div>}><Routes><Route path="/entregador" element={<DriverDeliveryPage />} /></Routes></Suspense>
+  }
 
   /**
    * Para onde mandar quem digita uma URL inexistente.
@@ -173,7 +185,9 @@ export function App() {
     )
   }
 
-  const homePath = can('reports:view')
+  const homePath = can('delivery:drive')
+    ? '/entregador'
+    : can('reports:view')
     ? '/'
     : can('pdv:use')
       ? '/pdv'
@@ -181,6 +195,8 @@ export function App() {
         ? '/cozinha'
         : can('ingredients:view')
           ? '/insumos'
+          : can('purchases:view') || can('purchases:manage')
+            ? '/compras'
           : can('products:view')
             ? '/cardapio'
             : '/sem-acesso'
@@ -264,6 +280,7 @@ export function App() {
               {(can('payables:view') || can('payables:manage')) && (
                 <Route path="/contas" element={<PayablesPage />} />
               )}
+              {(can('reports:view') || can('payables:view') || can('payables:manage') || can('cash:close')) && <Route path="/financeiro" element={<FinancePage />} />}
 
               {/* Painel de pedidos do balcao. Separado de /cozinha de proposito:
                   a cozinha ve o que produzir, este ve canal, pagamento e atraso.
@@ -296,7 +313,14 @@ export function App() {
 
               {/* Taxa por bairro tem a propria chave: define quanto a loja cobra
                   do cliente, e nao e a mesma decisao de ver relatorio. */}
-              {can('delivery:manage') && <Route path="/entrega" element={<DeliveryZones />} />}
+              {can('delivery:manage') && (
+                <>
+                  <Route path="/entregas" element={<DeliveriesPage />} />
+                  <Route path="/entrega" element={<DeliveryZones />} />
+                </>
+              )}
+              {(can('purchases:view') || can('purchases:manage')) && <Route path="/compras" element={<PurchasesPage />} />}
+              {can('customers:view') && <Route path="/clientes" element={<CustomersPage />} />}
 
               {/* Perfil da loja e equipe: exclusivos do dono, sem permissao
                   delegavel. Delegar "gerenciar funcionarios" permitiria que o

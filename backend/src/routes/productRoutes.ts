@@ -179,6 +179,8 @@ router.post('/', canWriteProducts, async (req: Request, res: Response) => {
       menuCategoryId,
       sortOrder = 0,
       featured = false,
+      preparationStation = 'Cozinha',
+      preparationTimeMinutes = 15,
     } = req.body;
 
     // Validações básicas
@@ -187,6 +189,13 @@ router.post('/', canWriteProducts, async (req: Request, res: Response) => {
     if (price == null || isNaN(Number(price))) return badRequest(res, 'Preço de venda inválido.');
 
     // Verifica SKU único no tenant
+    const cleanStation = String(preparationStation || '').trim();
+    const prepMinutes = Number(preparationTimeMinutes);
+    if (!cleanStation) return badRequest(res, 'Informe a estacao de preparo.');
+    if (!Number.isInteger(prepMinutes) || prepMinutes < 1 || prepMinutes > 240) {
+      return badRequest(res, 'O tempo de preparo deve ser um numero inteiro entre 1 e 240 minutos.');
+    }
+
     const normalizedSku = sku.trim().toUpperCase();
     const existing = await prisma.product.findFirst({ where: { sku: normalizedSku, tenantId } });
     if (existing) return badRequest(res, `SKU "${sku}" já existe neste tenant.`);
@@ -246,6 +255,8 @@ router.post('/', canWriteProducts, async (req: Request, res: Response) => {
           menuCategoryId: menuCategoryId || null,
           sortOrder: Number(sortOrder) || 0,
           featured: Boolean(featured),
+          preparationStation: cleanStation,
+          preparationTimeMinutes: prepMinutes,
           tenantId,
         },
       });
@@ -299,6 +310,8 @@ router.put('/:id', canWriteProducts, async (req: Request, res: Response) => {
       sortOrder,
       featured,
       active,
+      preparationStation,
+      preparationTimeMinutes,
     } = req.body;
 
     const product = await prisma.product.findFirst({ where: { id, tenantId } });
@@ -334,6 +347,16 @@ router.put('/:id', canWriteProducts, async (req: Request, res: Response) => {
     }
 
     // Monta dados de atualização apenas com campos presentes
+    if (preparationStation !== undefined && !String(preparationStation).trim()) {
+      return badRequest(res, 'Informe a estacao de preparo.');
+    }
+    if (preparationTimeMinutes !== undefined) {
+      const prepMinutes = Number(preparationTimeMinutes);
+      if (!Number.isInteger(prepMinutes) || prepMinutes < 1 || prepMinutes > 240) {
+        return badRequest(res, 'O tempo de preparo deve ser um numero inteiro entre 1 e 240 minutos.');
+      }
+    }
+
     const updateData: Prisma.ProductUpdateInput = {};
     if (name !== undefined) updateData.name = name.trim();
     if (description !== undefined) updateData.description = description?.trim();
@@ -349,6 +372,8 @@ router.put('/:id', canWriteProducts, async (req: Request, res: Response) => {
     if (sortOrder !== undefined) updateData.sortOrder = Number(sortOrder) || 0;
     if (featured !== undefined) updateData.featured = Boolean(featured);
     if (active !== undefined) updateData.active = Boolean(active);
+    if (preparationStation !== undefined) updateData.preparationStation = String(preparationStation).trim();
+    if (preparationTimeMinutes !== undefined) updateData.preparationTimeMinutes = Number(preparationTimeMinutes);
     if (menuCategoryId !== undefined) {
       updateData.menuCategory = menuCategoryId
         ? { connect: { id: menuCategoryId } }

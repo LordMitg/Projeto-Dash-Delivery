@@ -55,7 +55,7 @@ router.get(
       where: { tenantId: auth.tenantId },
       include: {
         user: {
-          select: { id: true, email: true, firstName: true, lastName: true, active: true, createdAt: true },
+          select: { id: true, email: true, firstName: true, lastName: true, phone: true, active: true, createdAt: true },
         },
       },
       orderBy: { createdAt: 'asc' },
@@ -70,6 +70,7 @@ router.get(
           email: m.user.email,
           firstName: m.user.firstName,
           lastName: m.user.lastName,
+          phone: m.user.phone,
           active: m.user.active,
           role: m.role,
           permissions: m.permissions,
@@ -90,6 +91,9 @@ const createSchema = z.object({
   lastName: z.string().trim().default(''),
   email: z.string().email('E-mail inválido').toLowerCase().trim(),
   password: z.string().min(6, 'A senha deve ter ao menos 6 caracteres'),
+  phone: z.string().trim().max(24).optional().default(''),
+  vehicleType: z.enum(['moto', 'carro', 'bicicleta', 'a_pe']).optional().default('moto'),
+  plate: z.string().trim().max(12).optional().default(''),
   /** Cargo apenas informativo, para pre-marcar as caixas. O que vale e `permissions`. */
   preset: z.string().trim().optional(),
   permissions: z.array(z.string()).default([]),
@@ -120,6 +124,19 @@ router.post(
         data: { userId: existing.id, tenantId: auth.tenantId, role: 'staff', permissions },
       })
 
+      if (permissions.includes('delivery:drive')) {
+        await prisma.fleet.create({
+          data: {
+            tenantId: auth.tenantId,
+            driverUserId: existing.id,
+            name: `${existing.firstName} ${existing.lastName}`.trim(),
+            phone: body.phone || existing.phone,
+            vehicleType: body.vehicleType,
+            plate: body.plate ? body.plate.toUpperCase() : null,
+          },
+        })
+      }
+
       return createdResponse(
         res,
         serialize({
@@ -128,6 +145,7 @@ router.post(
           email: existing.email,
           firstName: existing.firstName,
           lastName: existing.lastName,
+          phone: existing.phone,
           active: existing.active,
           role: 'staff',
           permissions,
@@ -145,6 +163,7 @@ router.post(
           password: await bcrypt.hash(body.password, 10),
           firstName: body.firstName,
           lastName: body.lastName,
+          phone: body.phone || null,
           role: 'staff',
           active: true,
         },
@@ -153,6 +172,19 @@ router.post(
       const membership = await tx.membership.create({
         data: { userId: user.id, tenantId: auth.tenantId, role: 'staff', permissions },
       })
+
+      if (permissions.includes('delivery:drive')) {
+        await tx.fleet.create({
+          data: {
+            tenantId: auth.tenantId,
+            driverUserId: user.id,
+            name: `${body.firstName} ${body.lastName}`.trim(),
+            phone: body.phone || null,
+            vehicleType: body.vehicleType,
+            plate: body.plate ? body.plate.toUpperCase() : null,
+          },
+        })
+      }
 
       return { user, membership }
     })
@@ -165,6 +197,7 @@ router.post(
         email: created.user.email,
         firstName: created.user.firstName,
         lastName: created.user.lastName,
+        phone: created.user.phone,
         active: created.user.active,
         role: 'staff',
         permissions,
@@ -180,6 +213,7 @@ router.post(
 const updateSchema = z.object({
   firstName: z.string().min(1).trim().optional(),
   lastName: z.string().trim().optional(),
+  phone: z.string().trim().max(24).optional(),
   active: z.boolean().optional(),
   permissions: z.array(z.string()).optional(),
   /** Redefinicao de senha pelo dono: nao exige a senha antiga. */
@@ -224,12 +258,13 @@ router.patch(
     }
 
     const updated = await prisma.$transaction(async (tx) => {
-      if (body.firstName !== undefined || body.lastName !== undefined || body.active !== undefined || body.newPassword) {
+      if (body.firstName !== undefined || body.lastName !== undefined || body.phone !== undefined || body.active !== undefined || body.newPassword) {
         await tx.user.update({
           where: { id: membership.user.id },
           data: {
             ...(body.firstName !== undefined ? { firstName: body.firstName } : {}),
             ...(body.lastName !== undefined ? { lastName: body.lastName } : {}),
+            ...(body.phone !== undefined ? { phone: body.phone || null } : {}),
             ...(body.active !== undefined ? { active: body.active } : {}),
             ...(body.newPassword ? { password: await bcrypt.hash(body.newPassword, 10) } : {}),
           },
@@ -243,10 +278,22 @@ router.patch(
         })
       }
 
+
+      const nextPermissions = body.permissions !== undefined ? sanitizePermissions(body.permissions) : membership.permissions
+      if (nextPermissions.includes('delivery:drive')) {
+        const user = await tx.user.findUniqueOrThrow({ where: { id: membership.user.id } })
+        const profile = await tx.fleet.findFirst({ where: { tenantId: auth.tenantId, driverUserId: user.id } })
+        if (profile) {
+          await tx.fleet.update({ where: { id: profile.id }, data: { active: true, name: `${user.firstName} ${user.lastName}`.trim(), phone: user.phone } })
+        } else {
+          await tx.fleet.create({ data: { tenantId: auth.tenantId, driverUserId: user.id, name: `${user.firstName} ${user.lastName}`.trim(), phone: user.phone } })
+        }
+      }
+
       return tx.membership.findUnique({
         where: { id: membership.id },
         include: {
-          user: { select: { id: true, email: true, firstName: true, lastName: true, active: true } },
+          user: { select: { id: true, email: true, firstName: true, lastName: true, phone: true, active: true } },
         },
       })
     })
@@ -259,6 +306,7 @@ router.patch(
         email: updated!.user.email,
         firstName: updated!.user.firstName,
         lastName: updated!.user.lastName,
+        phone: updated!.user.phone,
         active: updated!.user.active,
         role: updated!.role,
         permissions: updated!.permissions,
